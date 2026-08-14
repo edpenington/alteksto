@@ -136,11 +136,11 @@ def read_identity_text(pdf_path: Path, pages: int = IDENTITY_PAGES) -> str:
 def is_matchable(record: dict) -> bool:
     """Whether a record says anything a page could confirm.
 
-    A registry wrapper's own metadata is a dict of dicts too, so without
-    this the keys of {"_meta": ..., "data": ...} become two records with
-    the ids `_meta` and `data`, and a paper can be staged under one of
-    them. A record with no title, DOI, authors, or year identifies no
-    paper and is not a record.
+    A record with no title, DOI, authors, or year identifies no paper.
+    The distinction matters because a registry's own wrapper is a
+    mapping of mappings like the records are: {"_meta": {...}, "data":
+    {...}} reads as two records with the ids `_meta` and `data` unless
+    something asks what they claim about a paper.
     """
     return any(str(record.get(field) or "").strip()
                for field in MATCHABLE_FIELDS)

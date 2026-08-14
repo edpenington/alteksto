@@ -18,19 +18,22 @@ gates.
 You are reading this because someone said "use alteksto on these
 papers". Three things, in this order, and then stop reading:
 
-1. **Install it**, once per machine. Clone this repository and run
-   `tools/install.sh`. That builds the venv and registers the `alteksto`
-   skill and the `prepare-paper` and `sweep-paper` agent types under
-   `~/.claude`, so that a session working in any other repository can
-   spawn a converter. After it, the skill carries the rest of this and
-   you need no part of the repository in your head.
+1. **Clone it and build the venv** (see Quickstart, two commands), then
+   work with the clone as your working directory. That is the whole
+   setup: the `alteksto` skill and the `prepare-paper` and `sweep-paper`
+   agent types are in this repository, so a session sitting in the clone
+   already has them, and the skill carries the rest of this. Nothing is
+   installed anywhere else, and `git pull` is the only update.
+
+   Working in another repository and calling out to this one is the
+   other case, and it is the one that needs `tools/install.sh`. See
+   "Using alteksto from another project" below.
 
 2. **One agent per paper.** Spawn a `prepare-paper` agent per paper and
-   let it work. Converting one paper fills a context, so doing it
-   yourself costs you the context you need to run the others, and doing
-   it for several papers in a row is the mistake this paragraph exists
-   to prevent. `docs/calling.md` is the whole contract for handing
-   papers over: what you supply, what comes back, how to check it.
+   let it work. Converting one paper fills a context, so a caller who
+   converts has spent the context the other papers needed.
+   `docs/calling.md` is the whole contract for handing papers over:
+   what you supply, what comes back, how to check it.
 
 3. **A paper too large for one context is its own converter's problem.**
    It splits the work across subagents of its own and adjudicates
@@ -67,28 +70,15 @@ and says so loudly rather than guessing when it cannot.
   fresh-context sweep reads the paper against the renders and reports
   what the conversion missed, invented, or distorted.
 
-Each paper gets a converter agent of its own, which does that paper in
-a single context, and a second agent sweeps it with fresh eyes; a
-delegated fallback exists for a paper too large for one context. Many
-papers means many converters, one each, rather than one agent working
-through a list. The full route, the witness precedence, and the
-catalogue of defects real conversions produce live in `playbook/`,
-starting at `playbook/00-route.md`.
+The full route, the witness precedence, and the catalogue of defects
+real conversions produce live in `playbook/`, starting at
+`playbook/00-route.md`.
 
 ## Quickstart
 
-    tools/install.sh
-    .venv/bin/python -m pytest
-
-`install.sh` builds the venv, installs the package, registers the skill
-and the two agent types under `~/.claude`, and records this checkout's
-path as `ALTEKSTO_HOME` in `~/.claude/settings.json`. It overwrites
-nothing it did not create, `--dry-run` shows what it would do, and
-running it again is how a moved checkout is re-registered. Working on
-the repository itself needs none of that, only the venv:
-
     python -m venv .venv
     .venv/bin/pip install -e ".[dev]"
+    .venv/bin/python -m pytest
 
 Producing a bundle needs the page stack, `alteksto[tools]`, which the
 `[dev]` extra above already pulls in. Consuming one needs nothing:
@@ -102,14 +92,37 @@ at test time, and OCR and web lookups are faked. The worked example in
 skeleton, bundle, and crop regions committed beside it, and
 `examples/README.md` walks the route over it stage by stage.
 
-To convert a real paper, place it at `work/{id}/source.pdf` with
-`tools/stage.py` and follow `playbook/00-route.md`. To have papers
-converted rather than to convert one yourself, `docs/calling.md` is the
-whole calling contract, and reading `playbook/` is neither needed nor
-wanted. OCR needs
-`MISTRAL_API_KEY` in `.env`, and the web witness a contact email in
-`ALTEKSTO_CONTACT_EMAIL`; without either, the route continues with one
-fewer witness and says so loudly.
+A real paper reaches `work/{id}/source.pdf` through `tools/stage.py`,
+under an id its caller already has, and `playbook/00-route.md` takes it
+from there. OCR needs `MISTRAL_API_KEY` in `.env`, and the web witness
+a contact email in `ALTEKSTO_CONTACT_EMAIL`; without either, the route
+continues with one fewer witness and says so loudly.
+
+## Using alteksto from another project
+
+Working in this clone needs no installation. A project that keeps its
+own papers, ids, and results, and calls out to alteksto without its
+people ever opening this repository, does: its sessions cannot see a
+skill or an agent type that lives here, so one command registers them
+for the machine.
+
+    tools/install.sh
+
+It links the `alteksto` skill and the `prepare-paper` and `sweep-paper`
+agent types into `~/.claude`, and records this clone's path as
+`ALTEKSTO_HOME` in `~/.claude/settings.json`. Those are links rather
+than copies, so `git pull` updates them; rerun the script after a pull
+that changes dependencies, or after moving the clone.
+
+It writes outside this repository, so it is deliberate rather than part
+of the setup. It backs up any settings file it amends, keeps the keys
+already there, overwrites nothing it did not create, and `--dry-run`
+prints what it would do without doing it. To undo it, delete the three
+links and the `ALTEKSTO_HOME` entry.
+
+What that project supplies is described in `docs/calling.md`: where its
+PDFs are staged, which registry names them, and where finished bundles
+are collected. alteksto never invents an id.
 
 ## What never enters git
 

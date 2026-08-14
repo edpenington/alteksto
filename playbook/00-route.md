@@ -79,6 +79,7 @@ The bundle lands in `bundles/{id}/` as `manifest.json`, `text.md`, and
 Each tool does one thing to one work directory and exits. Run them
 through the project venv.
 
+    python tools/stage.py --id ID --pdf PATH --work work
     python tools/render_pages.py work/{id} [--dpi 150]
     python tools/dump_blocks.py work/{id}
     python tools/ocr.py work/{id} [--transport fake]

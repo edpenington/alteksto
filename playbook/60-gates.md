@@ -44,7 +44,9 @@ sweep.
 
 ## Gate 2: the fresh-context sweep
 
-A new agent with no conversation history (the sweep-paper agent) gets:
+A new agent with no conversation history (the sweep-paper agent) gets
+the checkout you are working in, named in its prompt exactly as yours
+named it, the paper's id, and:
 
 - the bundle's text.md,
 - the page renders,

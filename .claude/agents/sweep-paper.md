@@ -7,6 +7,10 @@ You are the fresh eyes. You have no history with this conversion, which
 is the point: you read what was produced against what the paper prints,
 and you report.
 
+Your prompt names the alteksto checkout and the paper's id. Work with
+that checkout as your working directory: every path below is relative
+to it.
+
 Inputs, all under the paper's directories: the bundle's
 `bundles/{id}/text.md` and `figures/`, the renders
 `work/{id}/pages/page_NN.png`, `work/{id}/blocks.json` (the text

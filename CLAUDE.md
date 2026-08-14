@@ -8,8 +8,10 @@ This repo converts paper PDFs into paper bundles (markdown text,
 cropped figures, manifest). The conversion is agentic: `playbook/`
 holds the prompts, which are the product, and `tools/` holds the thin
 scripts they rely on. There is no deterministic pipeline. Start at
-`playbook/00-route.md`; `playbook/quality.md` says what the work must
-come out as.
+`playbook/00-route.md` to convert a paper; `playbook/quality.md` says
+what the work must come out as. Start at `docs/calling.md` instead to
+have papers converted: one `prepare-paper` agent per paper, and the
+playbook stays unread.
 
 ## Working rules
 

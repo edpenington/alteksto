@@ -8,8 +8,10 @@ This repo converts paper PDFs into paper bundles (markdown text,
 cropped figures, manifest). The conversion is agentic: `playbook/`
 holds the prompts, which are the product, and `tools/` holds the thin
 scripts they rely on. There is no deterministic pipeline. Start at
-`playbook/00-route.md`; `playbook/quality.md` says what the work must
-come out as.
+`playbook/00-route.md` to convert a paper; `playbook/quality.md` says
+what the work must come out as. Start at `docs/calling.md` instead to
+have papers converted: one `prepare-paper` agent per paper, and the
+playbook stays unread.
 
 ## Working rules
 
@@ -19,6 +21,8 @@ come out as.
   failed PMC lookup warns loudly and continues with one fewer witness. No
   failure is ever silent.
 - Work on branches; changes are reviewed via PRs before merge.
+- Every commit published here is signed. If signing fails, stop and ask
+  for 1Password to be unlocked; never commit unsigned to get past it.
 - `work/` and `bundles/` are gitignored; no paper PDFs or full texts are
   ever committed (copyright).
 - Playbook, README, and tool language stays generic: any paper PDF, never a

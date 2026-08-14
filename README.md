@@ -13,6 +13,38 @@ the prompts rely on. There is no deterministic pipeline. The agent
 drives, the scripts serve, and the result is held to the page by two
 gates.
 
+## If you were asked to use alteksto
+
+You are reading this because someone said "use alteksto on these
+papers". Three things, in this order, and then stop reading:
+
+1. **Clone it and build the venv** (see Quickstart, two commands), then
+   work with the clone as your working directory. That is the whole
+   setup: the `alteksto` skill and the `prepare-paper` and `sweep-paper`
+   agent types are in this repository, so a session sitting in the clone
+   already has them, and the skill carries the rest of this. Nothing is
+   installed anywhere else, and `git pull` is the only update.
+
+   Working in another repository and calling out to this one is the
+   other case, and it is the one that needs `tools/install.sh`. See
+   "Using alteksto from another project" below.
+
+2. **One agent per paper.** Spawn a `prepare-paper` agent per paper and
+   let it work. Converting one paper fills a context, so a caller who
+   converts has spent the context the other papers needed.
+   `docs/calling.md` is the whole contract for handing papers over:
+   what you supply, what comes back, how to check it.
+
+3. **A paper too large for one context is its own converter's problem.**
+   It splits the work across subagents of its own and adjudicates
+   between them. That decision happens inside one paper's run and never
+   at your level.
+
+The id a paper is converted under always comes from the caller, from
+whatever registry already names these papers. alteksto never invents
+one: `tools/stage.py` matches a downloaded PDF to a record you supply,
+and says so loudly rather than guessing when it cannot.
+
 ## The route
 
     triage -> acquire -> skeleton -> walk -> figures -> gates
@@ -38,11 +70,9 @@ gates.
   fresh-context sweep reads the paper against the renders and reports
   what the conversion missed, invented, or distorted.
 
-By default one agent converts a paper in a single context and a second
-agent sweeps it with fresh eyes; a delegated fallback exists for a
-paper too large for one context. The full route, the witness
-precedence, and the catalogue of defects real conversions produce live
-in `playbook/`, starting at `playbook/00-route.md`.
+The full route, the witness precedence, and the catalogue of defects
+real conversions produce live in `playbook/`, starting at
+`playbook/00-route.md`.
 
 ## Quickstart
 
@@ -62,10 +92,40 @@ at test time, and OCR and web lookups are faked. The worked example in
 skeleton, bundle, and crop regions committed beside it, and
 `examples/README.md` walks the route over it stage by stage.
 
-To convert a real paper, place it at `work/{id}/source.pdf` and follow
-`playbook/00-route.md`. OCR needs `MISTRAL_API_KEY` in `.env`, and the
-web witness a contact email in `ALTEKSTO_CONTACT_EMAIL`; without
-either, the route continues with one fewer witness and says so loudly.
+A real paper reaches `work/{id}/source.pdf` through `tools/stage.py`,
+under an id its caller already has, and `playbook/00-route.md` takes it
+from there. OCR needs `MISTRAL_API_KEY` in `.env`, and the web witness
+a contact email in `ALTEKSTO_CONTACT_EMAIL`; without either, the route
+continues with one fewer witness and says so loudly.
+
+## Using alteksto from another project
+
+Working in this clone needs no installation. A project that keeps its
+own papers, ids, and results, and calls out to alteksto without its
+people ever opening this repository, does: its sessions cannot see a
+skill or an agent type that lives here, so one command registers them
+for the machine.
+
+    tools/install.sh
+
+It links the `alteksto` skill and the `prepare-paper` and `sweep-paper`
+agent types into `~/.claude`, and records this clone's path as
+`ALTEKSTO_HOME` in `~/.claude/settings.json`. Those are links rather
+than copies, so `git pull` updates them; rerun the script after a pull
+that changes dependencies, or after moving the clone.
+
+It writes outside this repository, so it is deliberate rather than part
+of the setup. It backs up any settings file it amends, keeps the keys
+already there, overwrites nothing it did not create, and `--dry-run`
+prints what it would do without doing it. `tools/install.sh
+--uninstall` takes it all back, and takes back only what this checkout
+registered: a link into a different checkout, a file somebody else
+wrote, and an `ALTEKSTO_HOME` naming somewhere else are each named and
+left alone.
+
+What that project supplies is described in `docs/calling.md`: where its
+PDFs are staged, which registry names them, and where finished bundles
+are collected. alteksto never invents an id.
 
 ## What never enters git
 

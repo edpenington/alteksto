@@ -5,12 +5,18 @@ a minimal valid bundle; each test then breaks exactly one rule and
 asserts the validator names it.
 """
 
+import ast
 import json
+import sys
+import tomllib
+from pathlib import Path
 
 import pytest
 
-from alteksto.bundle import validate_bundle
+from alteksto.bundle import figure_files, validate_bundle
 from conftest import load_tool
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 PNG_STUB = b"\x89PNG\r\n\x1a\n invented bytes; no check reads pixels"
 
@@ -95,6 +101,134 @@ def test_bad_ids_are_rejected(tmp_path, bad_id, expected):
     assert any(expected in p for p in validate_bundle(bundle))
 
 
+@pytest.mark.parametrize("key", ["schema_version", "id", "title", "exhibits"])
+def test_every_required_manifest_key_is_required(tmp_path, key):
+    """Each of the four, named as missing rather than defaulted.
+
+    A consumer reads these straight off the manifest once the verdict is in
+    (`manifest["id"]` names its output directory, `manifest["exhibits"]` is
+    the declaration it walks), so a key this stops requiring does not become
+    an absent value downstream: it becomes a crash after the verdict said the
+    bundle was fine.
+    """
+    bundle = make_bundle(tmp_path / "b")
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    del manifest[key]
+    (bundle / "manifest.json").write_text(json.dumps(manifest))
+    assert any(f"missing required key: '{key}'" in p
+               for p in validate_bundle(bundle))
+
+
+def test_an_exhibit_entry_needs_a_label(tmp_path):
+    # The other key a consumer indexes directly, one entry down.
+    bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    manifest["exhibits"] = [{"caption": "Table 1."}]
+    (bundle / "manifest.json").write_text(json.dumps(manifest))
+    assert any("missing required key: 'label'" in p
+               for p in validate_bundle(bundle))
+
+
+@pytest.mark.parametrize("key, value, expected", [
+    ("doi", 10.5555, "must be a string"),
+    ("summary", ["not", "a", "string"], "must be a string"),
+    ("summary", "   ", "non-empty"),
+    ("title", "  ", "non-empty"),
+    ("id", "", "non-empty"),
+])
+def test_a_present_value_is_still_typed(tmp_path, key, value, expected):
+    # Optional does not mean unchecked. A consumer that reads `doi` as a
+    # string, or shows `summary` to a model, gets a number or a list here
+    # unless this holds.
+    bundle = make_bundle(tmp_path / "b")
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    manifest[key] = value
+    (bundle / "manifest.json").write_text(json.dumps(manifest))
+    assert any(key in p and expected in p for p in validate_bundle(bundle))
+
+
+def test_an_exhibit_label_is_filename_and_citation_safe(tmp_path):
+    """The label rule, checked where the cross-check cannot mask it.
+
+    The crop is on disk under the offending name, so the declaration and the
+    directory agree and the only thing left to object to is the label itself.
+    It is a `figures/*.png` stem and the token a consumer cites, so a space,
+    a separator or a pipe in it breaks both uses.
+    """
+    bundle = make_bundle(tmp_path / "b")
+    (bundle / "figures").mkdir(exist_ok=True)
+    (bundle / "figures" / "Table 1 | fleet.png").write_bytes(PNG_STUB)
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    manifest["exhibits"] = [{"label": "Table 1 | fleet", "caption": "T1."}]
+    (bundle / "manifest.json").write_text(json.dumps(manifest))
+    problems = validate_bundle(bundle)
+    assert any("must match" in p and "Table 1 | fleet" in p for p in problems)
+
+
+def test_a_dotted_id_with_an_alphanumeric_is_allowed(tmp_path):
+    # The positive half of the id rule: the character class admits dots, and
+    # only an id with no letter or digit at all is refused.
+    bundle = make_bundle(tmp_path / "b")
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    manifest["id"] = "demo.001"
+    (bundle / "manifest.json").write_text(json.dumps(manifest))
+    assert validate_bundle(bundle) == []
+
+
+@pytest.mark.parametrize("entry, expected", [
+    ({"label": "table_01", "caption": "  "}, "'caption' must be a non-empty"),
+    ({"label": "  ", "caption": "T1."}, "'label' must be a non-empty"),
+    ({"label": 1, "caption": "T1."}, "'label' must be a string"),
+    ({"label": "table_01", "caption": ["T1."]}, "'caption' must be a string"),
+])
+def test_an_exhibit_entry_carries_non_empty_strings(tmp_path, entry, expected):
+    bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    manifest["exhibits"] = [entry]
+    (bundle / "manifest.json").write_text(json.dumps(manifest))
+    assert any(expected in p for p in validate_bundle(bundle))
+
+
+@pytest.mark.parametrize("exhibits, expected", [
+    ({"table_01": "Table 1."}, "'exhibits' must be a list"),
+    (["table_01"], "exhibits[0] must be an object"),
+])
+def test_exhibits_is_a_list_of_objects(tmp_path, exhibits, expected):
+    bundle = make_bundle(tmp_path / "b")
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    manifest["exhibits"] = exhibits
+    (bundle / "manifest.json").write_text(json.dumps(manifest))
+    assert any(expected in p for p in validate_bundle(bundle))
+
+
+def test_a_malformed_exhibits_block_is_not_cross_checked(tmp_path):
+    # The shape problem is the thing to fix. Cross-checking a declaration
+    # that does not parse against the directory would bury it under derived
+    # noise about crops nobody declared.
+    bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    manifest["exhibits"] = [{"label": "table_01"}]
+    (bundle / "manifest.json").write_text(json.dumps(manifest))
+    problems = validate_bundle(bundle)
+    assert any("missing required key: 'caption'" in p for p in problems)
+    assert not any("not declared" in p for p in problems)
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("{not json", "not valid JSON"),
+    ('["a", "list"]', "must be a JSON object"),
+])
+def test_a_manifest_that_is_not_an_object_is_one_problem(tmp_path, raw,
+                                                         expected):
+    # Reported, not raised: a consumer takes the verdict and reads the
+    # manifest afterwards, so a file that cannot be read as an object has to
+    # come back as a problem rather than as an exception out of the parse.
+    bundle = make_bundle(tmp_path / "b")
+    (bundle / "manifest.json").write_text(raw, encoding="utf-8")
+    problems = validate_bundle(bundle)
+    assert len(problems) == 1 and expected in problems[0]
+
+
 def test_exhibit_entries_take_label_caption_and_optional_notes(tmp_path):
     bundle = make_bundle(tmp_path / "b", figures=("table_01",))
     manifest = json.loads((bundle / "manifest.json").read_text())
@@ -175,6 +309,100 @@ def test_extra_files_beside_the_contract_are_ignored(tmp_path):
     bundle = make_bundle(tmp_path / "b")
     (bundle / "paperwork.txt").write_text("allowed")
     assert validate_bundle(bundle) == []
+
+
+class TestFigureFiles:
+    """The enumeration a consumer reads instead of writing its own."""
+
+    def test_it_answers_label_to_path_in_label_order(self, tmp_path):
+        bundle = make_bundle(tmp_path / "b",
+                             figures=("table_02", "fig_01", "table_01"))
+        found = figure_files(bundle)
+        assert list(found) == ["fig_01", "table_01", "table_02"]
+        assert found["fig_01"] == bundle / "figures" / "fig_01.png"
+
+    def test_it_skips_what_validation_skips(self, tmp_path):
+        # Hidden OS metadata is not an asset, and the two readings agree
+        # about that: a consumer that enumerated it would carry a label no
+        # check ever saw.
+        bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+        (bundle / "figures" / ".DS_Store").write_bytes(b"junk")
+        assert validate_bundle(bundle) == []
+        assert list(figure_files(bundle)) == ["table_01"]
+
+    def test_no_figures_directory_is_no_crops(self, tmp_path):
+        bundle = make_bundle(tmp_path / "b")
+        assert not (bundle / "figures").exists()
+        assert figure_files(bundle) == {}
+
+    def test_it_refuses_nothing_itself(self, tmp_path):
+        # A stray file is validate_bundle's to reject. This reports the
+        # crops beside it rather than raising, so a caller that has already
+        # taken the verdict gets what it came for.
+        bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+        (bundle / "figures" / "notes.txt").write_text("x", encoding="utf-8")
+        assert any("non-png" in p for p in validate_bundle(bundle))
+        assert list(figure_files(bundle)) == ["table_01"]
+
+    def test_a_png_suffix_is_read_case_insensitively(self, tmp_path):
+        # The case this function exists to keep in one place: a crop saved as
+        # .PNG is a crop, and validation and enumeration have to agree that
+        # its label is the stem. A consumer with its own reading would see
+        # either a stray file or no crop at all, for a bundle that is valid.
+        bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+        crop = bundle / "figures" / "table_01.png"
+        data = crop.read_bytes()
+        crop.unlink()
+        (bundle / "figures" / "table_01.PNG").write_bytes(data)
+        assert validate_bundle(bundle) == []
+        assert list(figure_files(bundle)) == ["table_01"]
+
+
+def test_the_contract_costs_a_consumer_nothing_to_install():
+    """A package that only reads and checks bundles depends on this one,
+    and gets the standard library and no more.
+
+    Both halves are asserted because either alone would let the promise
+    rot: a runtime dependency added to pyproject would land the page stack
+    in every consumer's environment, and an import added on the path to
+    `alteksto.bundle` would break a plain install at the one moment it
+    matters. Neither fault is visible to a suite that runs with the tools
+    extra installed, as this one always does, so both are read off the
+    files.
+
+    The path is BOTH files an importer executes, `__init__.py` and then
+    `bundle.py`, and a relative import counts: `from . import workdir`
+    reaches pymupdf as surely as importing it by name, and is the shape a
+    refactor is most likely to introduce.
+
+    Reading the source is the cheap guard, run on every change. The
+    expensive one is real: the `contract-is-installable-alone` job in CI
+    installs the built wheel where the page stack genuinely is not present
+    and validates a bundle there.
+    """
+    declared = tomllib.loads(
+        (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert declared["project"]["dependencies"] == []
+
+    package = REPO_ROOT / "src" / "alteksto"
+    for name in ("__init__.py", "bundle.py"):
+        tree = ast.parse((package / name).read_text(encoding="utf-8"))
+        imported = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(a.name.split(".")[0] for a in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                if node.level:
+                    # A relative import: the module it names is a sibling in
+                    # this package, and what that sibling imports is not this
+                    # file's to promise. `workdir` opens PDFs.
+                    imported.update(a.name for a in node.names)
+                    if node.module:
+                        imported.add(node.module.split(".")[0])
+                else:
+                    imported.add(node.module.split(".")[0])
+        assert imported <= set(sys.stdlib_module_names), (
+            name, sorted(imported - set(sys.stdlib_module_names)))
 
 
 def test_the_cli_reports_and_exits_nonzero(tmp_path, capsys):

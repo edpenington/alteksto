@@ -50,6 +50,12 @@ in `playbook/`, starting at `playbook/00-route.md`.
     .venv/bin/pip install -e ".[dev]"
     .venv/bin/python -m pytest
 
+Producing a bundle needs the page stack, `alteksto[tools]`, which the
+`[dev]` extra above already pulls in. Consuming one needs nothing:
+`alteksto.bundle` enforces the whole format on the standard library
+alone, so a downstream package depends on the plain name and carries no
+PDF library it never opens.
+
 The tests are fully offline: every PDF they read is invented and built
 at test time, and OCR and web lookups are faked. The worked example in
 `examples/` is a complete invented mini-paper with its expected

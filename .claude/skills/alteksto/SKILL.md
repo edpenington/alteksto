@@ -7,25 +7,31 @@ description: Convert paper PDFs into paper bundles (markdown full text, cropped 
 
 You are the caller, not the converter. Your job is to get each paper its
 own agent and to report what came back. You do not read page renders,
-you do not walk the text, and you do not open `playbook/`: that is the
-converter's manual, it is written to the agent doing one paper, and
-reading it will talk you into doing the work yourself.
+you do not walk the text, and you do not open `playbook/`, which is the
+converter's manual and turns whoever reads it into a converter.
 
-Converting one paper takes a whole context. Doing it here costs you the
-context you need to orchestrate, and doing it for several papers in a
-row is the failure this skill exists to prevent.
+Converting one paper fills a context. Spend yours on a paper and the
+rest of the papers have no orchestrator left.
 
 ## 1. Find the checkout
 
-The conversion runs inside the alteksto checkout. `ALTEKSTO_HOME` names
-it. If that is unset, look for a checkout under the user's code
-directory before assuming there is none, and if there really is none,
-install it: clone `https://github.com/edpenington/alteksto`, then run
-`tools/install.sh` from the clone, which builds the venv and registers
-this skill and the two agent types. Say where you installed it.
+The conversion runs inside the alteksto checkout, in three likely
+states:
 
-Everything below runs with the checkout as the working directory, and
-`.venv/bin/python` as the interpreter.
+- **You are already in it**, if the working directory holds
+  `playbook/00-route.md`. Nothing to find.
+- **`ALTEKSTO_HOME` is set**, which is what `tools/install.sh` records.
+  Use it.
+- **Neither**, so it is not on this machine. Clone
+  `https://github.com/edpenington/alteksto` somewhere the user agrees
+  to, build the venv (`python -m venv .venv`, then
+  `.venv/bin/pip install -e ".[dev]"`), and say where you put it. Only
+  run `tools/install.sh` if this project will keep calling out to
+  alteksto, because it writes to `~/.claude`; ask first.
+
+Everything below runs with the checkout as the working directory and
+`.venv/bin/python` as the interpreter. A checkout with no `.venv` has
+not been set up: build it before staging anything.
 
 ## 2. Collect the four project facts
 

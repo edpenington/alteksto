@@ -1,10 +1,9 @@
 # Calling alteksto
 
 This page is for an agent or a session that has papers to convert and
-wants bundles back. It is the whole contract. You do not need to read
-`playbook/` to call this, and you should not: the playbook is the
-converter's manual, written to the agent doing one paper, and reading
-it tends to talk a caller into doing the conversion itself.
+wants bundles back. It is the whole contract. Calling alteksto needs
+nothing from `playbook/`, which is the converter's manual, written to
+the agent doing one paper, and turns whoever reads it into a converter.
 
 ## The rule
 
@@ -92,10 +91,10 @@ clean run.
 ## Papers in parallel
 
 Papers are independent as long as their ids differ, because the id
-namespaces both the work directory and the bundle. Spawn them
-together. Nothing is shared between two papers' runs, and nothing
-should be: another paper's text appearing in a draft is the worst
-defect this pipeline can produce.
+namespaces both the work directory and the bundle. Nothing is shared
+between two papers' runs, and nothing should be: another paper's text
+appearing in a draft is the worst defect this pipeline can produce.
+One paper failing is one paper failing, and the rest carry on.
 
 ## When a run fails
 

@@ -1,23 +1,41 @@
 #!/usr/bin/env bash
-# Make this checkout usable from any session on this machine.
+# Make this checkout usable from sessions working somewhere else.
 #
-# Builds the virtual environment, then registers the skill and the two
-# agent types under ~/.claude so that a session working in another
-# repository can spawn a converter without knowing anything about this
-# one. The registrations are symlinks, so pulling this repository
-# updates them; the checkout's location is passed separately, as
-# ALTEKSTO_HOME in ~/.claude/settings.json, which is what lets the
-# linked files stay free of any path from this machine.
+# Working in the checkout needs none of this: the skill and the agent
+# types are in the repository, so a session sitting here already has
+# them. This script is for the other case, a project that keeps its own
+# papers and ids and calls out to alteksto, whose sessions cannot see
+# anything that lives here.
 #
-# Safe to run again. It overwrites nothing it did not create: an
-# existing file where a link belongs stops the install with its name.
+# It builds the virtual environment, then registers the skill and the
+# two agent types under ~/.claude. The registrations are symlinks, so
+# pulling this repository updates them; the checkout's location is
+# passed separately, as ALTEKSTO_HOME in ~/.claude/settings.json, which
+# is what lets the linked files stay free of any path from any one
+# machine.
 #
-#     tools/install.sh [--dry-run]
+# It writes outside this repository, so it is run deliberately and never
+# as a side effect of setting the project up. It is safe to run again,
+# and overwrites nothing it did not create: an existing file where a
+# link belongs stops the install with its name, and a settings file it
+# amends is backed up first.
+#
+#     tools/install.sh [--dry-run] [--links-only]
+#
+#     --dry-run     print what it would do, change nothing
+#     --links-only  skip the venv, for an environment managed elsewhere
 
 set -euo pipefail
 
 DRY_RUN=0
-[ "${1:-}" = "--dry-run" ] && DRY_RUN=1
+LINKS_ONLY=0
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run) DRY_RUN=1 ;;
+        --links-only) LINKS_ONLY=1 ;;
+        *) printf 'install: unknown option %s\n' "$arg" >&2; exit 2 ;;
+    esac
+done
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLAUDE_DIR="${HOME}/.claude"
@@ -35,15 +53,19 @@ run() {
 say "checkout at ${ROOT}"
 
 # The virtual environment. Producing a bundle needs the page stack, which
-# is the [tools] extra that [dev] already pulls in.
-if [ -x "${ROOT}/.venv/bin/python" ]; then
+# is the [tools] extra that [dev] already pulls in. --links-only skips
+# this for an environment somebody else manages.
+if [ "$LINKS_ONLY" = 1 ]; then
+    say "skipping venv (--links-only)"
+elif [ -x "${ROOT}/.venv/bin/python" ]; then
     say "venv present"
+    run "${ROOT}/.venv/bin/pip" install --quiet -e "${ROOT}[dev]"
 else
     say "building venv"
     run python3 -m venv "${ROOT}/.venv"
     run "${ROOT}/.venv/bin/pip" install --quiet --upgrade pip
+    run "${ROOT}/.venv/bin/pip" install --quiet -e "${ROOT}[dev]"
 fi
-run "${ROOT}/.venv/bin/pip" install --quiet -e "${ROOT}[dev]"
 
 # The registrations. A symlink pointing where we want it is already done;
 # anything else in the way is the operator's file and is never removed.
@@ -103,6 +125,28 @@ else:
                              encoding="utf-8")
     print(f"install: ALTEKSTO_HOME={root}")
 PY
+fi
+
+# What was linked has to resolve, or the registration is a silent
+# nothing: a session finds no skill and no agent types, and reports no
+# error, because an absent skill looks exactly like a skill nobody
+# wrote. A link into a checkout that has moved, or that is sitting on a
+# revision without these files, dies here rather than at the point of
+# use.
+if [ "$DRY_RUN" = 0 ]; then
+    broken=0
+    for path in "${CLAUDE_DIR}/skills/alteksto/SKILL.md" \
+                "${CLAUDE_DIR}/agents/prepare-paper.md" \
+                "${CLAUDE_DIR}/agents/sweep-paper.md"; do
+        [ -e "${path}" ] || { say "BROKEN: ${path} resolves to nothing"; \
+                              broken=1; }
+    done
+    if [ "$broken" = 1 ]; then
+        say "the registration is incomplete; a session will find no"
+        say "alteksto skill and say nothing about it"
+        exit 1
+    fi
+    say "all three registrations resolve"
 fi
 
 say "done. In a new session, from any repository, say:"

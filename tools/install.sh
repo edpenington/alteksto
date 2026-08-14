@@ -24,15 +24,18 @@
 #
 #     --dry-run     print what it would do, change nothing
 #     --links-only  skip the venv, for an environment managed elsewhere
+#     --uninstall   remove what this checkout registered, and nothing else
 
 set -euo pipefail
 
 DRY_RUN=0
 LINKS_ONLY=0
+UNINSTALL=0
 for arg in "$@"; do
     case "$arg" in
         --dry-run) DRY_RUN=1 ;;
         --links-only) LINKS_ONLY=1 ;;
+        --uninstall) UNINSTALL=1 ;;
         *) printf 'install: unknown option %s\n' "$arg" >&2; exit 2 ;;
     esac
 done
@@ -51,6 +54,70 @@ run() {
 }
 
 say "checkout at ${ROOT}"
+
+LINK_PATHS=("${CLAUDE_DIR}/skills/alteksto"
+            "${CLAUDE_DIR}/agents/prepare-paper.md"
+            "${CLAUDE_DIR}/agents/sweep-paper.md")
+LINK_TARGETS=("${ROOT}/.claude/skills/alteksto"
+              "${ROOT}/.claude/agents/prepare-paper.md"
+              "${ROOT}/.claude/agents/sweep-paper.md")
+
+# Removal takes back exactly what this checkout registered. A link
+# pointing at some other checkout belongs to that one, a real file
+# belongs to whoever wrote it, and an ALTEKSTO_HOME naming somewhere
+# else is somebody else's install: each is named and left alone.
+if [ "$UNINSTALL" = 1 ]; then
+    removed=0
+    for index in "${!LINK_PATHS[@]}"; do
+        path="${LINK_PATHS[$index]}"
+        target="${LINK_TARGETS[$index]}"
+        if [ -L "${path}" ]; then
+            if [ "$(readlink "${path}")" = "${target}" ]; then
+                run rm "${path}"
+                say "removed ${path}"
+                removed=$((removed + 1))
+            else
+                say "left alone (points elsewhere): ${path}"
+            fi
+        elif [ -e "${path}" ]; then
+            say "left alone (not a link): ${path}"
+        fi
+    done
+    say "${removed} of 3 registrations removed"
+
+    if [ -f "${SETTINGS}" ] && [ "$DRY_RUN" = 0 ]; then
+        python3 - "$SETTINGS" "$ROOT" <<'PY'
+import json, shutil, sys
+from pathlib import Path
+
+settings_path, root = Path(sys.argv[1]), sys.argv[2]
+try:
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+except json.JSONDecodeError as exc:
+    sys.exit(f"install: {settings_path} is not valid JSON ({exc}); "
+             f"remove ALTEKSTO_HOME by hand")
+env = settings.get("env")
+if not isinstance(env, dict) or "ALTEKSTO_HOME" not in env:
+    print("install: no ALTEKSTO_HOME to remove")
+elif env["ALTEKSTO_HOME"] != root:
+    print(f"install: left alone, ALTEKSTO_HOME names {env['ALTEKSTO_HOME']}")
+else:
+    shutil.copy2(settings_path, settings_path.with_suffix(".json.bak"))
+    del env["ALTEKSTO_HOME"]
+    if not env:
+        del settings["env"]
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n",
+                             encoding="utf-8")
+    print("install: removed ALTEKSTO_HOME")
+PY
+    elif [ "$DRY_RUN" = 1 ]; then
+        say "would remove ALTEKSTO_HOME from ${SETTINGS}"
+    fi
+
+    say "done. Sessions outside this checkout no longer see the alteksto"
+    say "skill or its agent types. Working in the checkout is unaffected."
+    exit 0
+fi
 
 # The virtual environment. Producing a bundle needs the page stack, which
 # is the [tools] extra that [dev] already pulls in. --links-only skips
@@ -88,11 +155,9 @@ link() {
 }
 
 run mkdir -p "${CLAUDE_DIR}/skills" "${CLAUDE_DIR}/agents"
-link "${ROOT}/.claude/skills/alteksto" "${CLAUDE_DIR}/skills/alteksto"
-link "${ROOT}/.claude/agents/prepare-paper.md" \
-     "${CLAUDE_DIR}/agents/prepare-paper.md"
-link "${ROOT}/.claude/agents/sweep-paper.md" \
-     "${CLAUDE_DIR}/agents/sweep-paper.md"
+for index in "${!LINK_PATHS[@]}"; do
+    link "${LINK_TARGETS[$index]}" "${LINK_PATHS[$index]}"
+done
 
 # ALTEKSTO_HOME, merged into whatever settings.json already holds. The
 # file is the operator's, so it is read, amended in memory, backed up,
@@ -136,8 +201,7 @@ fi
 if [ "$DRY_RUN" = 0 ]; then
     broken=0
     for path in "${CLAUDE_DIR}/skills/alteksto/SKILL.md" \
-                "${CLAUDE_DIR}/agents/prepare-paper.md" \
-                "${CLAUDE_DIR}/agents/sweep-paper.md"; do
+                "${LINK_PATHS[1]}" "${LINK_PATHS[2]}"; do
         [ -e "${path}" ] || { say "BROKEN: ${path} resolves to nothing"; \
                               broken=1; }
     done

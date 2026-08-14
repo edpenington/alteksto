@@ -117,8 +117,11 @@ that changes dependencies, or after moving the clone.
 It writes outside this repository, so it is deliberate rather than part
 of the setup. It backs up any settings file it amends, keeps the keys
 already there, overwrites nothing it did not create, and `--dry-run`
-prints what it would do without doing it. To undo it, delete the three
-links and the `ALTEKSTO_HOME` entry.
+prints what it would do without doing it. `tools/install.sh
+--uninstall` takes it all back, and takes back only what this checkout
+registered: a link into a different checkout, a file somebody else
+wrote, and an `ALTEKSTO_HOME` naming somewhere else are each named and
+left alone.
 
 What that project supplies is described in `docs/calling.md`: where its
 PDFs are staged, which registry names them, and where finished bundles

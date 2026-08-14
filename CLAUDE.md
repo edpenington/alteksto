@@ -21,6 +21,8 @@ playbook stays unread.
   failed PMC lookup warns loudly and continues with one fewer witness. No
   failure is ever silent.
 - Work on branches; changes are reviewed via PRs before merge.
+- Every commit published here is signed. If signing fails, stop and ask
+  for 1Password to be unlocked; never commit unsigned to get past it.
 - `work/` and `bundles/` are gitignored; no paper PDFs or full texts are
   ever committed (copyright).
 - Playbook, README, and tool language stays generic: any paper PDF, never a

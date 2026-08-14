@@ -1,0 +1,133 @@
+{
+  "id": "example",
+  "page_count": 3,
+  "units": [
+    {
+      "index": 1,
+      "kind": "front_matter",
+      "title": "Reed bed management and heron counts on the Marrow Levels: a three-season warden survey",
+      "depth": 1,
+      "pages": [1, 1],
+      "opening_words": "Reed bed management and heron counts",
+      "closing_words": "Fenmouth (a.quill@example.invalid).",
+      "notes": "the correspondence note is printed at the foot of the page, away from the author line, and belongs to this unit"
+    },
+    {
+      "index": 2,
+      "kind": "front_matter",
+      "title": "Abstract",
+      "depth": 2,
+      "pages": [1, 1],
+      "opening_words": "We counted grey herons on the",
+      "closing_words": "wardens, counts, invented data",
+      "notes": "the keywords line closes the unit; the abstract itself ends at 'for the same compartment.'"
+    },
+    {
+      "index": 3,
+      "kind": "section",
+      "title": "1. Introduction",
+      "depth": 2,
+      "pages": [1, 1],
+      "opening_words": "Herons are counted because they are",
+      "closing_words": "in the reeds on one morning.",
+      "notes": "a word is broken across a line break in the first paragraph, 'compart-' then 'ments'; the walk heals it"
+    },
+    {
+      "index": 4,
+      "kind": "section",
+      "title": "2. Methods",
+      "depth": 2,
+      "pages": [2, 2],
+      "opening_words": "2. Methods",
+      "closing_words": "2. Methods",
+      "notes": "a heading and nothing else; the section's prose begins at 2.1"
+    },
+    {
+      "index": 5,
+      "kind": "section",
+      "title": "2.1 Study site",
+      "depth": 3,
+      "pages": [2, 2],
+      "opening_words": "Twelve counting stations were placed on",
+      "closing_words": "neighbour of about the same size."
+    },
+    {
+      "index": 6,
+      "kind": "section",
+      "title": "2.2 Counting protocol",
+      "depth": 3,
+      "pages": [2, 2],
+      "opening_words": "Each station was walked at dawn",
+      "closing_words": "counts agreed within one bird.",
+      "notes": "Table 1 is printed between the unit's two paragraphs; the sentinel goes at that break, and the table's footnote line is the exhibit's, not the text's"
+    },
+    {
+      "index": 7,
+      "kind": "section",
+      "title": "2.3 Analysis",
+      "depth": 3,
+      "pages": [2, 3],
+      "opening_words": "Counts were summarised as a mean",
+      "closing_words": "more than one time of day.",
+      "notes": "the unit crosses the page join mid-sentence: page 2 ends 'of the opposite sign, a' and page 3 opens 'reversal the discussion returns to.'"
+    },
+    {
+      "index": 8,
+      "kind": "section",
+      "title": "3. Results",
+      "depth": 2,
+      "pages": [3, 3],
+      "opening_words": "Cut compartments held more herons than",
+      "closing_words": "at 33 of the 36 station visits.",
+      "notes": "Figure 1 is printed after the unit's paragraph; the sentinel follows it"
+    },
+    {
+      "index": 9,
+      "kind": "section",
+      "title": "4. Discussion",
+      "depth": 2,
+      "pages": [3, 3],
+      "opening_words": "Herons follow the water, and the",
+      "closing_words": "as much as about birds."
+    },
+    {
+      "index": 10,
+      "kind": "references",
+      "title": "References",
+      "depth": 2,
+      "pages": [3, 3],
+      "opening_words": "Quill, A. and Marsh, C. (2004)",
+      "closing_words": "College Reports, 3, 12–19."
+    }
+  ],
+  "reference_count": 3,
+  "exhibits": [
+    {
+      "label": "table_01",
+      "kind": "table",
+      "printed": "Table 1",
+      "caption": "Mean heron count per station by season and compartment type.",
+      "pages": [2],
+      "panels": 1,
+      "footnote": true,
+      "bbox_proposals": 0
+    },
+    {
+      "label": "figure_01",
+      "kind": "figure",
+      "printed": "Figure 1",
+      "caption": "Mean heron count at each matched pair of stations in spring, cut against uncut.",
+      "pages": [3],
+      "panels": 1,
+      "footnote": false,
+      "bbox_proposals": 0
+    }
+  ],
+  "page_footnotes": [
+    {
+      "page": 1,
+      "kind": "correspondence",
+      "words": "Correspondence: Ada Quill, Institute"
+    }
+  ]
+}

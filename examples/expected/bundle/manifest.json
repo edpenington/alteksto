@@ -1,0 +1,18 @@
+{
+  "schema_version": 2,
+  "id": "example",
+  "title": "Reed bed management and heron counts on the Marrow Levels: a three-season warden survey",
+  "doi": "10.5555/invented.2026.0041",
+  "summary": "We counted grey herons on the invented Marrow Levels across three seasons to ask whether reed bed management changes how many birds a warden sees. Twelve stations were walked at dawn on fixed dates, and counts were compared between cut and uncut compartments. Cut compartments held more herons in spring and fewer in autumn, and the seasonal difference was larger than the difference between observers. Count data of this kind is best read beside the management record for the same compartment.",
+  "exhibits": [
+    {
+      "label": "table_01",
+      "caption": "Mean heron count per station by season and compartment type.",
+      "notes": "Counts are station means over three dawn visits, 06:00–08:00. Differences are cut minus uncut."
+    },
+    {
+      "label": "figure_01",
+      "caption": "Mean heron count at each matched pair of stations in spring, cut against uncut."
+    }
+  ]
+}

@@ -16,18 +16,55 @@ and crops, and a caller that starts one has nothing left for the rest.
 
 ## What you supply
 
-Per paper, before spawning anything:
+Per paper: an id, the PDF, and the DOI when known. The DOI enables the
+web witness, and without it the run continues with one fewer witness
+and says so.
 
-- an id, which names everything downstream and must be unique across
-  the papers you are converting;
-- the PDF at `work/{id}/source.pdf`, which the converter fails without;
-- the DOI, when known, which enables the web witness. Without it the
-  run continues with one fewer witness and says so.
+The id is yours and alteksto never invents one. It comes from whatever
+registry already names these papers, a review's export or a
+spreadsheet, and it is what every stage after intake trusts: a paper
+converted under another paper's id is wrong in a way no later stage can
+detect, because nothing downstream re-examines the question.
 
-The converter's working directory is this checkout, and every path it
-uses is relative to it. A caller working in another repository sets
-that working directory when it spawns, and keeps its own paths out of
-the prompt.
+## Staging
+
+`tools/stage.py` puts a PDF at `work/{id}/source.pdf`, which is where
+the converter looks. When you already know which file is which:
+
+    python tools/stage.py --id ID --pdf PATH --work work
+    python tools/stage.py --map-file id-to-path.json --work work
+
+When you have a folder of downloads and a registry that names the
+papers, it matches them for you, scoring each file's front matter
+against the records:
+
+    python tools/stage.py --from DIR --registry FILE [--records KEY] \
+        --work work
+
+It stages the confident matches and prints one line per paper on
+stdout, `id`, source path, action, which is the list you spawn from.
+Exit `0` is everything staged, `3` is some ambiguous and staged
+nothing, `1` is a hard failure. An ambiguous match is reported with its
+scores and needs a decision from you: restage it by id once you know
+which paper it is.
+
+## Spawning
+
+One agent of type `prepare-paper` per staged id, in waves of about
+four, because each converter renders pages, calls OCR, and views crops.
+The converter works inside this checkout and every path in the playbook
+is relative to it, so a caller working in another repository names the
+checkout in the prompt and keeps its own paths out:
+
+    Convert paper {id}. Your working directory is {checkout}; every path
+    in the playbook is relative to it. The PDF is at
+    work/{id}/source.pdf. DOI: {doi, or "unknown"}. Deliver
+    bundles/{id}/ and report the path to work/{id}/sweep-report.md.
+
+Then leave them to it. A paper too large for one context is handled by
+its own converter splitting the work across subagents of its own and
+adjudicating between them, which is a decision inside that paper's run
+and not one you make or oversee.
 
 ## What you get
 

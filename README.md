@@ -13,6 +13,35 @@ the prompts rely on. There is no deterministic pipeline. The agent
 drives, the scripts serve, and the result is held to the page by two
 gates.
 
+## If you were asked to use alteksto
+
+You are reading this because someone said "use alteksto on these
+papers". Three things, in this order, and then stop reading:
+
+1. **Install it**, once per machine. Clone this repository and run
+   `tools/install.sh`. That builds the venv and registers the `alteksto`
+   skill and the `prepare-paper` and `sweep-paper` agent types under
+   `~/.claude`, so that a session working in any other repository can
+   spawn a converter. After it, the skill carries the rest of this and
+   you need no part of the repository in your head.
+
+2. **One agent per paper.** Spawn a `prepare-paper` agent per paper and
+   let it work. Converting one paper fills a context, so doing it
+   yourself costs you the context you need to run the others, and doing
+   it for several papers in a row is the mistake this paragraph exists
+   to prevent. `docs/calling.md` is the whole contract for handing
+   papers over: what you supply, what comes back, how to check it.
+
+3. **A paper too large for one context is its own converter's problem.**
+   It splits the work across subagents of its own and adjudicates
+   between them. That decision happens inside one paper's run and never
+   at your level.
+
+The id a paper is converted under always comes from the caller, from
+whatever registry already names these papers. alteksto never invents
+one: `tools/stage.py` matches a downloaded PDF to a record you supply,
+and says so loudly rather than guessing when it cannot.
+
 ## The route
 
     triage -> acquire -> skeleton -> walk -> figures -> gates
@@ -48,9 +77,18 @@ starting at `playbook/00-route.md`.
 
 ## Quickstart
 
+    tools/install.sh
+    .venv/bin/python -m pytest
+
+`install.sh` builds the venv, installs the package, registers the skill
+and the two agent types under `~/.claude`, and records this checkout's
+path as `ALTEKSTO_HOME` in `~/.claude/settings.json`. It overwrites
+nothing it did not create, `--dry-run` shows what it would do, and
+running it again is how a moved checkout is re-registered. Working on
+the repository itself needs none of that, only the venv:
+
     python -m venv .venv
     .venv/bin/pip install -e ".[dev]"
-    .venv/bin/python -m pytest
 
 Producing a bundle needs the page stack, `alteksto[tools]`, which the
 `[dev]` extra above already pulls in. Consuming one needs nothing:
@@ -64,10 +102,11 @@ at test time, and OCR and web lookups are faked. The worked example in
 skeleton, bundle, and crop regions committed beside it, and
 `examples/README.md` walks the route over it stage by stage.
 
-To convert a real paper, place it at `work/{id}/source.pdf` and follow
-`playbook/00-route.md`. To have papers converted rather than to
-convert one yourself, `docs/calling.md` is the whole calling contract,
-and reading `playbook/` is neither needed nor wanted. OCR needs
+To convert a real paper, place it at `work/{id}/source.pdf` with
+`tools/stage.py` and follow `playbook/00-route.md`. To have papers
+converted rather than to convert one yourself, `docs/calling.md` is the
+whole calling contract, and reading `playbook/` is neither needed nor
+wanted. OCR needs
 `MISTRAL_API_KEY` in `.env`, and the web witness a contact email in
 `ALTEKSTO_CONTACT_EMAIL`; without either, the route continues with one
 fewer witness and says so loudly.

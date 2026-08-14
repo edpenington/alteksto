@@ -9,9 +9,13 @@ instruction set; this file only wires it together.
 This file is a job description, not a procedure to follow in place.
 Whoever wants a paper converted spawns one agent of this type per
 paper rather than doing the conversion themselves; `docs/calling.md`
-is their side of the contract. Work with the alteksto checkout as your
-working directory: every path below and in the playbook is relative to
-it.
+is their side of the contract.
+
+Your prompt names the alteksto checkout and your id. Work with that
+checkout as your working directory: every path below and in the
+playbook is relative to it, and a path from whatever repository spawned
+you belongs in none of them. If your prompt named no checkout, find it
+before starting, and say which one you chose.
 
 Read, in order, before acting: `playbook/00-route.md`,
 `playbook/quality.md`, then each stage file as you reach its stage

@@ -6,9 +6,9 @@ produces to it, and downstream consumers (*meltiro* first among them)
 read it. The format evolves here, by a `schema_version` bump, and
 consumers follow.
 
-The format is at `schema_version` 2. Version 1 is the shape *meltiro*
-consumes at the time of writing; version 2 adds the optional exhibit
-`notes` field and nothing else, and *meltiro* follows by accepting it.
+The format is at `schema_version` 2. A bundle declares that version and
+a consumer accepts it; a bundle declaring any other version is not a
+bundle.
 
 ## Layout
 
@@ -80,6 +80,10 @@ included.
 Optional as a directory: absent means no images, and the manifest's
 `exhibits` is what says whether that is correct. When present, every
 file is a `.png` whose stem is a declared label.
+
+`alteksto.bundle.figure_files(path)` answers which files those are, label
+to path, so a consumer reads the directory the way the validator does
+rather than reimplementing the rule above.
 
 Two cross-checks bind declaration to directory, both hard errors:
 

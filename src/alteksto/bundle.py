@@ -7,6 +7,15 @@ format (*meltiro* first among them) accept what passes here.
 `validate_bundle(path)` returns EVERY problem as a list of strings; an
 empty list means the bundle is valid. Nothing is raised for a malformed
 bundle, so a caller can report all problems at once.
+
+`figure_files(path)` answers the other question a consumer has to ask of
+the directory: which files in it are exhibits, and what each is called.
+That is a rule of the format too, so it is answered here rather than
+reimplemented by every reader.
+
+Both work on the standard library alone. The page tools need pymupdf and
+lxml; the contract needs nothing, so a consumer depends on this package
+and carries no PDF library it never opens.
 """
 
 from __future__ import annotations
@@ -253,13 +262,43 @@ def _validate_text(root: Path) -> list[str]:
     return []
 
 
+def figure_files(root) -> dict[str, Path]:
+    """The crops a bundle supplies: label to path, ordered by label.
+
+    Which files under figures/ are exhibits, and what each one is called,
+    are rules of the format, so they are answered here once and read by
+    everyone: by the validator below, and by a consumer loading a bundle it
+    has already validated. Two enumerations of the same directory could
+    disagree about a case-varying suffix or a dotfile, and the consumer's
+    would win, putting a label in front of a reader that no check ever saw.
+
+    It reports nothing and refuses nothing. A stray file is validate_bundle's
+    to reject; a missing figures/ is the no-images case, and the manifest's
+    exhibits is what says whether that is correct. The ordering is by label
+    rather than by directory order, so one bundle enumerates identically on
+    every filesystem.
+    """
+    figures_dir = Path(root) / "figures"
+    if not figures_dir.is_dir():
+        return {}
+    found = {}
+    for child in sorted(figures_dir.iterdir()):
+        if child.name.startswith("."):
+            continue  # hidden OS metadata (.DS_Store etc.) is not an asset
+        if child.is_dir():
+            continue
+        if child.suffix.lower() == ".png":
+            found[child.stem] = child
+    return {label: found[label] for label in sorted(found)}
+
+
 def _validate_figures(root: Path):
     """Return (problems, present_labels) for the figures/ directory.
 
-    present_labels is the stem of every *.png in it, and None when the
-    directory itself is unusable (so the caller skips the cross-checks).
-    A missing figures/ is not an error here: it is the no-images case,
-    and the manifest's exhibits is what says whether that is correct.
+    present_labels is the label of every crop figure_files finds, and None
+    when the directory itself is unusable (so the caller skips the
+    cross-checks). What is a crop is that function's answer, not a second
+    reading of the directory; what is left over is what is reported here.
     """
     figures_dir = root / "figures"
     if not figures_dir.exists():
@@ -267,16 +306,13 @@ def _validate_figures(root: Path):
     if not figures_dir.is_dir():
         return [f"figures exists but is not a directory: {figures_dir}"], None
     problems: list[str] = []
-    labels: list[str] = []
     for child in sorted(figures_dir.iterdir()):
         if child.name.startswith("."):
-            continue  # hidden OS metadata (.DS_Store etc.) is not an asset
+            continue
         if child.is_dir():
             problems.append(f"figures/ contains a subdirectory (only .png "
                             f"files allowed): {child.name}")
         elif child.suffix.lower() != ".png":
             problems.append(f"figures/ contains a non-png file (only .png "
                             f"files allowed): {child.name}")
-        else:
-            labels.append(child.stem)
-    return problems, labels
+    return problems, list(figure_files(root))

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from alteksto.bundle import validate_bundle
+from alteksto.bundle import figure_files, validate_bundle
 from conftest import load_tool
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -181,6 +181,40 @@ def test_extra_files_beside_the_contract_are_ignored(tmp_path):
     bundle = make_bundle(tmp_path / "b")
     (bundle / "paperwork.txt").write_text("allowed")
     assert validate_bundle(bundle) == []
+
+
+class TestFigureFiles:
+    """The enumeration a consumer reads instead of writing its own."""
+
+    def test_it_answers_label_to_path_in_label_order(self, tmp_path):
+        bundle = make_bundle(tmp_path / "b",
+                             figures=("table_02", "fig_01", "table_01"))
+        found = figure_files(bundle)
+        assert list(found) == ["fig_01", "table_01", "table_02"]
+        assert found["fig_01"] == bundle / "figures" / "fig_01.png"
+
+    def test_it_skips_what_validation_skips(self, tmp_path):
+        # Hidden OS metadata is not an asset, and the two readings agree
+        # about that: a consumer that enumerated it would carry a label no
+        # check ever saw.
+        bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+        (bundle / "figures" / ".DS_Store").write_bytes(b"junk")
+        assert validate_bundle(bundle) == []
+        assert list(figure_files(bundle)) == ["table_01"]
+
+    def test_no_figures_directory_is_no_crops(self, tmp_path):
+        bundle = make_bundle(tmp_path / "b")
+        assert not (bundle / "figures").exists()
+        assert figure_files(bundle) == {}
+
+    def test_it_refuses_nothing_itself(self, tmp_path):
+        # A stray file is validate_bundle's to reject. This reports the
+        # crops beside it rather than raising, so a caller that has already
+        # taken the verdict gets what it came for.
+        bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+        (bundle / "figures" / "notes.txt").write_text("x", encoding="utf-8")
+        assert any("non-png" in p for p in validate_bundle(bundle))
+        assert list(figure_files(bundle)) == ["table_01"]
 
 
 def test_the_contract_costs_a_consumer_nothing_to_install():

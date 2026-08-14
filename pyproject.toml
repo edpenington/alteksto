@@ -11,8 +11,8 @@ requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Ed Penington" }]
-# Nothing. The format contract — `alteksto.bundle`, which enforces
-# docs/bundle.md — imports the standard library and nothing else, and a
+# Nothing. The format contract (`alteksto.bundle`, which enforces
+# docs/bundle.md) imports the standard library and nothing else, and a
 # consumer that only reads and checks bundles is entitled to an install that
 # weighs what the contract weighs. The page stack sits behind the `tools`
 # extra below.

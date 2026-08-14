@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A public repository: give the default token nothing it does not need.
+permissions:
+  contents: read
+
+# One run per ref. A force-push supersedes the run it interrupts.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The versions pyproject.toml claims support for.
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # `[dev]` pulls the `tools` extra, because the suite exercises the page
+      # tools and its conftest opens a PDF to build the invented fixtures.
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      # Offline by construction: every PDF the suite reads is invented and
+      # built at test time, and OCR and web lookups are faked. No key is read
+      # and nothing here can spend.
+      - name: Test
+        run: pytest -q
+
+  contract-is-installable-alone:
+    # The promise a downstream consumer depends on: `alteksto.bundle`, which
+    # is the whole format contract, works on a plain install with no
+    # third-party package present. The suite's own guard reads that off the
+    # files; this proves it against a real environment, where the page stack
+    # genuinely is not installed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build --wheel
+      - run: pip install dist/*.whl
+      - name: Validate a bundle with the page stack absent
+        run: |
+          python - <<'PY'
+          import importlib.util as u
+          for absent in ("pymupdf", "fitz", "lxml"):
+              assert u.find_spec(absent) is None, f"{absent} unexpectedly installed"
+          import json, pathlib, sys
+          from alteksto.bundle import figure_files, validate_bundle
+          root = pathlib.Path("bundle")
+          (root / "figures").mkdir(parents=True)
+          (root / "text.md").write_text("# An invented paper\n\nBody.\n")
+          (root / "figures" / "table_01.png").write_bytes(b"\x89PNG invented")
+          (root / "manifest.json").write_text(json.dumps({
+              "schema_version": 2, "id": "inv-01", "title": "An invented paper",
+              "exhibits": [{"label": "table_01", "caption": "Table 1.",
+                            "notes": "Invented footnote."}],
+          }))
+          assert validate_bundle(root) == [], validate_bundle(root)
+          assert list(figure_files(root)) == ["table_01"]
+          assert "pymupdf" not in sys.modules
+          print("ok: the contract holds on the standard library alone")
+          PY

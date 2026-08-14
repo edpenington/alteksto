@@ -11,17 +11,27 @@ requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Ed Penington" }]
-dependencies = [
-    # 1.24.3 first ships the pymupdf module name; before it, only fitz.
-    "pymupdf>=1.24.3",
-    "lxml>=5.0",
-]
+# Nothing. The format contract — `alteksto.bundle`, which enforces
+# docs/bundle.md — imports the standard library and nothing else, and a
+# consumer that only reads and checks bundles is entitled to an install that
+# weighs what the contract weighs. The page stack sits behind the `tools`
+# extra below.
+dependencies = []
 
 # No [project.scripts]: the package holds only what the tools share, and the
 # tools are run as scripts, not entry points.
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+# What the page tools need to open a PDF and read a page: `alteksto.workdir`
+# and everything under tools/ that renders, crops or parses. `pip install
+# alteksto[tools]` is the producing side of the format; a plain install is the
+# consuming side.
+# 1.24.3 first ships the pymupdf module name; before it, only fitz.
+tools = ["pymupdf>=1.24.3", "lxml>=5.0"]
+# The suite exercises the tools, so it needs what they need. Self-referential
+# so the floors are declared once, above, and cannot drift from the extra the
+# tools are actually installed with.
+dev = ["alteksto[tools]", "pytest>=8.0"]
 
 [tool.setuptools.dynamic]
 version = { attr = "alteksto.__version__" }

@@ -5,12 +5,18 @@ a minimal valid bundle; each test then breaks exactly one rule and
 asserts the validator names it.
 """
 
+import ast
 import json
+import sys
+import tomllib
+from pathlib import Path
 
 import pytest
 
 from alteksto.bundle import validate_bundle
 from conftest import load_tool
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 PNG_STUB = b"\x89PNG\r\n\x1a\n invented bytes; no check reads pixels"
 
@@ -175,6 +181,33 @@ def test_extra_files_beside_the_contract_are_ignored(tmp_path):
     bundle = make_bundle(tmp_path / "b")
     (bundle / "paperwork.txt").write_text("allowed")
     assert validate_bundle(bundle) == []
+
+
+def test_the_contract_costs_a_consumer_nothing_to_install():
+    """A package that only reads and checks bundles depends on this one,
+    and gets the standard library and no more.
+
+    Both halves are asserted because either alone would let the promise
+    rot: a runtime dependency added to pyproject would land the page stack
+    in every consumer's environment, and an import added to bundle.py
+    would break a plain install at the one moment it matters. Neither
+    fault is visible to a suite that runs with the tools extra installed,
+    as this one always does, so both are read off the files.
+    """
+    declared = tomllib.loads(
+        (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert declared["project"]["dependencies"] == []
+
+    tree = ast.parse((REPO_ROOT / "src" / "alteksto" / "bundle.py")
+                     .read_text(encoding="utf-8"))
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0:
+            imported.add(node.module.split(".")[0])
+    assert imported <= set(sys.stdlib_module_names), sorted(
+        imported - set(sys.stdlib_module_names))
 
 
 def test_the_cli_reports_and_exits_nonzero(tmp_path, capsys):

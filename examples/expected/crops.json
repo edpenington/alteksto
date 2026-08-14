@@ -1,0 +1,24 @@
+{
+  "id": "example",
+  "render_dpi": 150,
+  "note": "The crop regions a correct figure stage arrives at for this paper. No PNG is committed (bundles are not), so this file is what a run compares its own boxes against: crop.py cuts the same pixels from a 150 DPI render given these boxes and this space. Neither exhibit has an OCR proposal behind it, because the figure is drawn as vector art and tables are never proposed, so both regions were located from the render with the text layer's own bboxes as the starting point.",
+  "space": "Boxes are in the PDF page space in points, the size blocks.json records for the page. Hand it to crop.py as --space and the tool maps the boxes into render pixels; never scale them by hand.",
+  "exhibits": [
+    {
+      "label": "table_01",
+      "page": 2,
+      "space": [595, 842],
+      "boxes": [[82, 406, 478, 522]],
+      "includes": "the top rule, which the caption sits directly above, the header row and its rule, the three body rows, the bottom rule, and the printed footnote line",
+      "excludes": "the caption, which belongs to text.md, and the paragraphs above and below the float"
+    },
+    {
+      "label": "figure_01",
+      "page": 3,
+      "space": [595, 842],
+      "boxes": [[111, 308, 478, 452]],
+      "includes": "the figure's own printed title, the legend riding beside it, both axes with their tick labels, the twelve bars, and the axis label under them",
+      "excludes": "the caption below the figure, which belongs to text.md"
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alteksto"
+dynamic = ["version"]
+description = "Shared code for turning a paper PDF into a clean paper bundle (markdown full text, cropped figures, manifest)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Ed Penington" }]
+dependencies = [
+    # 1.24.3 first ships the pymupdf module name; before it, only fitz.
+    "pymupdf>=1.24.3",
+    "lxml>=5.0",
+]
+
+# No [project.scripts]: the package holds only what the tools share, and the
+# tools are run as scripts, not entry points.
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.dynamic]
+version = { attr = "alteksto.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# The PEP 561 marker is data, not a module, so it is not picked up by the
+# package finder and has to be listed here or the wheel ships without it and
+# every type checker ignores the package's annotations.
+[tool.setuptools.package-data]
+alteksto = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+# -rs prints every skip with its reason. Without it a skipped test is a bare
+# dot in the output, indistinguishable from a pass. A skip must look like a
+# skip.
+addopts = "-rs"
+# pymupdf's SWIG bindings trip a Python 3.14 deprecation at import time.
+# The filter names the exact message so every other warning still shows.
+filterwarnings = [
+    "ignore:builtin type Swig:DeprecationWarning",
+    "ignore:builtin type swigvarlink:DeprecationWarning",
+]

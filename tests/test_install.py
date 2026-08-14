@@ -112,6 +112,57 @@ def test_a_stale_link_is_repointed(tmp_path):
         REPO_ROOT / ".claude" / "skills" / "alteksto")
 
 
+def test_uninstall_takes_back_what_it_registered(tmp_path):
+    assert install(tmp_path).returncode == 0
+
+    result = install(tmp_path, "--uninstall")
+
+    assert result.returncode == 0, result.stderr
+    for name in LINKS:
+        assert not (tmp_path / ".claude" / name).exists()
+        assert not (tmp_path / ".claude" / name).is_symlink()
+    assert "env" not in settings_of(tmp_path)
+
+
+def test_uninstall_keeps_other_settings(tmp_path):
+    claude = tmp_path / ".claude"
+    claude.mkdir()
+    (claude / "settings.json").write_text(json.dumps(
+        {"model": "opus", "env": {"OTHER": "kept"}}), encoding="utf-8")
+    assert install(tmp_path).returncode == 0
+
+    assert install(tmp_path, "--uninstall").returncode == 0
+
+    settings = settings_of(tmp_path)
+    assert settings["model"] == "opus"
+    assert settings["env"] == {"OTHER": "kept"}
+
+
+def test_uninstall_leaves_another_checkouts_registration(tmp_path):
+    claude = tmp_path / ".claude"
+    (claude / "agents").mkdir(parents=True)
+    (claude / "skills").mkdir()
+    elsewhere = tmp_path / "other-checkout"
+    elsewhere.mkdir()
+    (claude / "agents" / "prepare-paper.md").symlink_to(elsewhere / "a.md")
+    (claude / "settings.json").write_text(json.dumps(
+        {"env": {"ALTEKSTO_HOME": str(elsewhere)}}), encoding="utf-8")
+
+    result = install(tmp_path, "--uninstall")
+
+    assert result.returncode == 0, result.stderr
+    assert (claude / "agents" / "prepare-paper.md").is_symlink()
+    assert settings_of(tmp_path)["env"]["ALTEKSTO_HOME"] == str(elsewhere)
+    assert "points elsewhere" in result.stdout
+
+
+def test_uninstall_with_nothing_installed_is_quiet_success(tmp_path):
+    result = install(tmp_path, "--uninstall")
+
+    assert result.returncode == 0, result.stderr
+    assert "0 of 3" in result.stdout
+
+
 def test_a_dangling_registration_fails_loudly(tmp_path):
     """A link into a checkout without these files must not pass silently."""
     fake_root = tmp_path / "checkout"

@@ -6,6 +6,13 @@ description: Convert one paper PDF in work/{id}/ into a validated paper bundle i
 You convert one paper PDF into one paper bundle. The playbook is the
 instruction set; this file only wires it together.
 
+This file is a job description, not a procedure to follow in place.
+Whoever wants a paper converted spawns one agent of this type per
+paper rather than doing the conversion themselves; `docs/calling.md`
+is their side of the contract. Work with the alteksto checkout as your
+working directory: every path below and in the playbook is relative to
+it.
+
 Read, in order, before acting: `playbook/00-route.md`,
 `playbook/quality.md`, then each stage file as you reach its stage
 (10-triage, 20-sources, 30-skeleton, 40-walk, 50-figures, 60-gates).
@@ -19,12 +26,13 @@ easy to drift from mid-run:
 
 - Every stage is re-entrant: validate existing outputs rather than
   redoing them.
-- The conversion runs in your one context by default: you read
-  the renders yourself, walk every unit, view your own crops, and
-  batch independent reads into parallel tool calls in the same turn.
-  Delegate only when the paper outgrows one context, and then never
-  read a page image yourself: subagents hold the pixels and you
-  adjudicate through them.
+- You convert your paper in your own context: you read the renders
+  yourself, walk every unit, view your own crops, and batch
+  independent reads into parallel tool calls in the same turn. Split
+  the paper across subagents only when it outgrows your context, and
+  then never read a page image yourself: subagents hold the pixels and
+  you adjudicate through them. This constrains you inside your paper.
+  Other papers are other agents' runs and no concern of yours.
 - The render decides every witness dispute, read by whoever holds the
   pixels.
 - Preserve the source, defects included.

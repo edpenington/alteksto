@@ -38,11 +38,13 @@ gates.
   fresh-context sweep reads the paper against the renders and reports
   what the conversion missed, invented, or distorted.
 
-By default one agent converts a paper in a single context and a second
-agent sweeps it with fresh eyes; a delegated fallback exists for a
-paper too large for one context. The full route, the witness
-precedence, and the catalogue of defects real conversions produce live
-in `playbook/`, starting at `playbook/00-route.md`.
+Each paper gets a converter agent of its own, which does that paper in
+a single context, and a second agent sweeps it with fresh eyes; a
+delegated fallback exists for a paper too large for one context. Many
+papers means many converters, one each, rather than one agent working
+through a list. The full route, the witness precedence, and the
+catalogue of defects real conversions produce live in `playbook/`,
+starting at `playbook/00-route.md`.
 
 ## Quickstart
 
@@ -63,9 +65,12 @@ skeleton, bundle, and crop regions committed beside it, and
 `examples/README.md` walks the route over it stage by stage.
 
 To convert a real paper, place it at `work/{id}/source.pdf` and follow
-`playbook/00-route.md`. OCR needs `MISTRAL_API_KEY` in `.env`, and the
-web witness a contact email in `ALTEKSTO_CONTACT_EMAIL`; without
-either, the route continues with one fewer witness and says so loudly.
+`playbook/00-route.md`. To have papers converted rather than to
+convert one yourself, `docs/calling.md` is the whole calling contract,
+and reading `playbook/` is neither needed nor wanted. OCR needs
+`MISTRAL_API_KEY` in `.env`, and the web witness a contact email in
+`ALTEKSTO_CONTACT_EMAIL`; without either, the route continues with one
+fewer witness and says so loudly.
 
 ## What never enters git
 

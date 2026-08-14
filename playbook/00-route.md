@@ -1,5 +1,10 @@
 # The route
 
+This file is the converter's manual, and it addresses the agent
+converting one paper. If you have papers to hand off rather than a
+paper to convert, `docs/calling.md` is the whole calling contract:
+spawn one converter per paper and stop reading here.
+
 One paper PDF becomes one paper bundle: markdown full text, cropped
 figures and tables, a manifest, passing validate-bundle against the
 format this repo owns (docs/bundle.md). The conversion runs in six
@@ -48,16 +53,20 @@ The bundle lands in `bundles/{id}/` as `manifest.json`, `text.md`, and
 - **The renders are ground truth.** Every disagreement between text
   witnesses is settled by looking at the page image, not by preferring
   a witness on reputation.
-- **One context converts; the sweep is the fresh eyes.** The
-  conversion runs in a single context by default: the converter reads
-  its own renders, walks every unit, views its own crops, and batches
-  independent reads into parallel tool calls in the same turn. Fresh
-  eyes are the sweep's job, once, at the end, and cheap determinism
-  (the emphasis runs, the validator, the canary) guards the middle.
-  Delegation is the fallback for a paper too large for one context;
-  when delegating, the driver never reads a page image, works in text
-  only, and subagents deliver their reports as files in the work
-  directory (the driver reads files, never waits on messages).
+- **One converter per paper; the sweep is the fresh eyes.** A paper
+  gets a converter of its own, and that converter does the whole
+  conversion in its own context: it reads its own renders, walks every
+  unit, views its own crops, and batches independent reads into
+  parallel tool calls in the same turn. Fresh eyes are the sweep's
+  job, once, at the end, and cheap determinism (the emphasis runs, the
+  validator, the canary) guards the middle. This rule governs what
+  happens inside one paper and says nothing about how many papers run
+  at once: many papers means many converters, one each, working in
+  parallel and never in the caller's own context. Splitting a single
+  paper across subagents is the fallback for a paper too large for one
+  context; when splitting, the driver never reads a page image, works
+  in text only, and subagents deliver their reports as files in the
+  work directory (the driver reads files, never waits on messages).
 - **Preserve the source, defects included.** Papers contain typos,
   garbled references, and mismatched statistics. The bundle transcribes
   what the paper prints. Correcting the source, however tempting, is

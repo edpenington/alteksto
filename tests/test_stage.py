@@ -230,6 +230,127 @@ def test_a_reference_list_does_not_decide_identity(stage_tool, tmp_path):
     assert not (work / "#1702").exists()
 
 
+@pytest.mark.parametrize("bad", ["../escaped", "a/b", "/etc/passwd", "",
+                                 "  ", "..", "10.1234/herons.2019"])
+def test_an_id_that_is_a_path_is_refused(stage_tool, tmp_path, capsys, bad):
+    """An id names one directory; anything else escapes the work root."""
+    pdf = make_pdf(tmp_path / "in" / "paper.pdf", HERONS)
+    work = tmp_path / "work"
+
+    code = stage_tool.main(["--work", str(work), "--id", bad, "--pdf", str(pdf)])
+
+    assert code == 1
+    assert "stage:" in capsys.readouterr().err
+    assert not (tmp_path / "escaped").exists()
+    assert not any(work.rglob("source.pdf")) if work.exists() else True
+
+
+def test_a_superseded_doi_does_not_match_its_successors_page(stage_tool,
+                                                             tmp_path):
+    """A .pub2 update prints a DOI that starts with the original's."""
+    make_pdf(tmp_path / "staging" / "paper.pdf",
+             ["An invented Cochrane review, updated",
+              "https://doi.org/10.1002/14651858.CD001234.pub2", "2021"])
+    registry = write_registry(tmp_path / "registry.json", records={
+        "#OLD": {"title": "A quite different superseded invented title",
+                 "doi": "10.1002/14651858.CD001234", "year": "2009"},
+    })
+    work = tmp_path / "work"
+
+    code = stage_tool.main(["--work", str(work), "--from",
+                            str(tmp_path / "staging"),
+                            "--registry", str(registry)])
+
+    assert code == 3
+    assert not (work / "#OLD").exists()
+
+
+def test_the_doi_still_matches_its_own_page(stage_tool, tmp_path):
+    """The boundary check must not reject the DOI the page really prints."""
+    make_pdf(tmp_path / "staging" / "paper.pdf",
+             ["An invented Cochrane review, updated",
+              "doi: 10.1002/14651858.CD001234.pub2.", "2021"])
+    registry = write_registry(tmp_path / "registry.json", records={
+        "#NEW": {"title": "An invented Cochrane review, updated",
+                 "doi": "10.1002/14651858.CD001234.pub2", "year": "2021"},
+    })
+    work = tmp_path / "work"
+
+    assert stage_tool.main(["--work", str(work), "--from",
+                            str(tmp_path / "staging"),
+                            "--registry", str(registry)]) == 0
+    assert (work / "#NEW" / "source.pdf").is_file()
+
+
+def test_two_records_sharing_a_doi_are_ambiguous(stage_tool, tmp_path, capsys):
+    """Registry order must not decide which of a tied pair wins."""
+    make_pdf(tmp_path / "staging" / "paper.pdf", HERONS)
+    registry = write_registry(tmp_path / "registry.json", records={
+        "#1013": dict(REGISTRY["#1013"]),
+        "#9999": dict(REGISTRY["#1013"]),
+    })
+    work = tmp_path / "work"
+
+    code = stage_tool.main(["--work", str(work), "--from",
+                            str(tmp_path / "staging"),
+                            "--registry", str(registry)])
+
+    assert code == 3
+    assert not (work / "#1013").exists()
+    assert not (work / "#9999").exists()
+    assert "AMBIGUOUS" in capsys.readouterr().err
+
+
+def test_a_list_registry_without_ids_says_so(stage_tool, tmp_path, capsys):
+    registry = tmp_path / "registry.json"
+    registry.write_text(json.dumps(
+        [{"covidence_id": "#1013", "title": "Counting herons in a reed bed",
+          "doi": "10.1234/herons.2019"}]), encoding="utf-8")
+    make_pdf(tmp_path / "staging" / "paper.pdf", HERONS)
+
+    code = stage_tool.main(["--work", str(tmp_path / "work"), "--from",
+                            str(tmp_path / "staging"),
+                            "--registry", str(registry)])
+
+    assert code == 1
+    error = capsys.readouterr().err
+    assert "'id' field" in error
+    assert "--records" not in error
+
+
+def test_skipped_registry_records_are_reported(stage_tool, tmp_path, capsys):
+    make_pdf(tmp_path / "staging" / "paper.pdf", HERONS)
+    registry = write_registry(tmp_path / "registry.json", records={
+        "#1013": dict(REGISTRY["#1013"]),
+        "#dud": {"journal": "An invented journal"},
+    })
+
+    stage_tool.main(["--work", str(tmp_path / "work"), "--from",
+                     str(tmp_path / "staging"), "--registry", str(registry)])
+
+    assert "skipped 1 registry record" in capsys.readouterr().err
+
+
+def test_a_map_file_value_that_is_not_a_path_fails_loudly(stage_tool,
+                                                          tmp_path, capsys):
+    map_file = tmp_path / "map.json"
+    map_file.write_text(json.dumps({"#1013": 5}), encoding="utf-8")
+
+    code = stage_tool.main(["--work", str(tmp_path / "work"),
+                            "--map-file", str(map_file)])
+
+    assert code == 1
+    assert "rather than a path" in capsys.readouterr().err
+
+
+def test_surnames_split_on_commas_and_hyphens(stage_tool):
+    assert stage_tool.surnames("Smith J, Jones K, Brown L") == {
+        "smith", "jones", "brown"}
+    assert stage_tool.surnames("Marsh, A. B.; Sluice, C. D.") == {
+        "marsh", "sluice"}
+    assert stage_tool.surname_printed("smith-jones", {"smith", "wardens"})
+
+
 def test_mode_flags_are_exclusive(stage_tool, tmp_path):
     with pytest.raises(SystemExit):
         stage_tool.main(["--id", "x", "--pdf", "y", "--map-file", "z"])

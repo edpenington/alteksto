@@ -156,6 +156,58 @@ def test_uninstall_leaves_another_checkouts_registration(tmp_path):
     assert "points elsewhere" in result.stdout
 
 
+def test_uninstall_dry_run_removes_nothing_and_says_so(tmp_path):
+    assert install(tmp_path).returncode == 0
+
+    result = install(tmp_path, "--uninstall", "--dry-run")
+
+    assert result.returncode == 0, result.stderr
+    assert "would" in result.stdout
+    assert "registrations removed" not in result.stdout
+    for name in LINKS:
+        assert (tmp_path / ".claude" / name).is_symlink()
+    assert settings_of(tmp_path)["env"]["ALTEKSTO_HOME"] == str(REPO_ROOT)
+
+
+def test_a_rerun_does_not_overwrite_the_backup(tmp_path):
+    """The backup must keep the file as it stood before any install."""
+    claude = tmp_path / ".claude"
+    claude.mkdir()
+    pristine = json.dumps({"model": "opus"})
+    (claude / "settings.json").write_text(pristine, encoding="utf-8")
+    assert install(tmp_path).returncode == 0
+
+    assert install(tmp_path).returncode == 0
+
+    backup = json.loads((claude / "settings.json.bak").read_text())
+    assert "env" not in backup
+    assert backup == {"model": "opus"}
+
+
+def test_settings_that_are_not_an_object_stop_the_install(tmp_path):
+    claude = tmp_path / ".claude"
+    claude.mkdir()
+    (claude / "settings.json").write_text('["a list"]', encoding="utf-8")
+
+    result = install(tmp_path)
+
+    assert result.returncode != 0
+    assert "not a JSON object" in result.stdout + result.stderr
+    assert not (claude / "settings.json.bak").exists()
+
+
+def test_an_env_that_is_not_an_object_stops_the_install(tmp_path):
+    claude = tmp_path / ".claude"
+    claude.mkdir()
+    (claude / "settings.json").write_text(
+        json.dumps({"env": "not an object"}), encoding="utf-8")
+
+    result = install(tmp_path)
+
+    assert result.returncode != 0
+    assert "not an object" in result.stdout + result.stderr
+
+
 def test_uninstall_with_nothing_installed_is_quiet_success(tmp_path):
     result = install(tmp_path, "--uninstall")
 

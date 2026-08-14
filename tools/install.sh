@@ -74,7 +74,7 @@ if [ "$UNINSTALL" = 1 ]; then
         if [ -L "${path}" ]; then
             if [ "$(readlink "${path}")" = "${target}" ]; then
                 run rm "${path}"
-                say "removed ${path}"
+                [ "$DRY_RUN" = 1 ] || say "removed ${path}"
                 removed=$((removed + 1))
             else
                 say "left alone (points elsewhere): ${path}"
@@ -83,7 +83,11 @@ if [ "$UNINSTALL" = 1 ]; then
             say "left alone (not a link): ${path}"
         fi
     done
-    say "${removed} of 3 registrations removed"
+    if [ "$DRY_RUN" = 1 ]; then
+        say "would remove ${removed} of 3 registrations"
+    else
+        say "${removed} of 3 registrations removed"
+    fi
 
     if [ -f "${SETTINGS}" ] && [ "$DRY_RUN" = 0 ]; then
         python3 - "$SETTINGS" "$ROOT" <<'PY'
@@ -172,19 +176,34 @@ import json, shutil, sys
 from pathlib import Path
 
 settings_path, root = Path(sys.argv[1]), sys.argv[2]
-settings = {}
-if settings_path.is_file():
+settings, existed = {}, settings_path.is_file()
+if existed:
     try:
         settings = json.loads(settings_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         sys.exit(f"install: {settings_path} is not valid JSON ({exc}); "
                  f"fix it or set ALTEKSTO_HOME by hand")
-    shutil.copy2(settings_path, settings_path.with_suffix(".json.bak"))
-env = settings.setdefault("env", {})
+# The operator's file, so its shape is checked rather than assumed: a
+# settings file that is not an object, or whose env is not one, is
+# theirs to explain, and guessing at it would discard whatever it means.
+if not isinstance(settings, dict):
+    sys.exit(f"install: {settings_path} is not a JSON object; "
+             f"set ALTEKSTO_HOME by hand")
+env = settings.get("env", {})
+if not isinstance(env, dict):
+    sys.exit(f"install: {settings_path} has an 'env' that is not an object; "
+             f"set ALTEKSTO_HOME by hand")
+
 if env.get("ALTEKSTO_HOME") == root:
     print(f"install: ALTEKSTO_HOME already {root}")
 else:
+    # Backed up only when something is about to change, so that a rerun
+    # that writes nothing cannot overwrite the backup of the file as it
+    # stood before any of this.
+    if existed:
+        shutil.copy2(settings_path, settings_path.with_suffix(".json.bak"))
     env["ALTEKSTO_HOME"] = root
+    settings["env"] = env
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings_path.write_text(json.dumps(settings, indent=2) + "\n",
                              encoding="utf-8")

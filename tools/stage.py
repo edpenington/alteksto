@@ -43,6 +43,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import sys
@@ -81,6 +82,10 @@ DOI_PREFIXES = ("https://dx.doi.org/", "https://doi.org/",
 # paper, whatever else it holds.
 MATCHABLE_FIELDS = ("title", "doi", "authors", "year")
 
+# Characters that can carry a DOI on: seeing one straight after a match
+# means the page prints a longer identifier than the one being matched.
+DOI_CONTINUES = re.compile(r"[0-9a-z/_-]")
+
 
 def normalise_doi(raw: str) -> str:
     """A DOI reduced to the part that identifies, lowercase, no spaces."""
@@ -90,6 +95,54 @@ def normalise_doi(raw: str) -> str:
             value = value[len(prefix):]
             break
     return re.sub(r"\s+", "", value)
+
+
+def doi_printed(doi: str, flat_text: str) -> bool:
+    """Whether the page prints this DOI, and not a longer one starting with it.
+
+    DOIs nest: a Cochrane review's `.pub2` update carries the original's
+    DOI as a prefix, and the two are different papers. A plain substring
+    test scores the superseded record a decisive hit against the page of
+    its successor, which stages a paper under the wrong id and says
+    nothing. Anything that could continue the identifier disqualifies
+    the match, so an uncertain DOI becomes no DOI and the run falls back
+    to the title, the authors, and the margin, or to asking.
+    """
+    if not doi:
+        return False
+    start = flat_text.find(doi)
+    while start != -1:
+        tail = flat_text[start + len(doi):start + len(doi) + 2]
+        if not tail or not (DOI_CONTINUES.match(tail[0])
+                            or (tail[0] == "." and len(tail) > 1
+                                and tail[1].isalnum())):
+            return True
+        start = flat_text.find(doi, start + 1)
+    return False
+
+
+def check_id(paper_id: str) -> str:
+    """The id, or a ValueError saying why it cannot name a directory.
+
+    An id becomes a path (`work/{id}`, `bundles/{id}`) in every stage
+    after this one, and in registry mode it arrives as a key from a file
+    this repository did not write. An id carrying a separator escapes
+    the work root rather than naming a directory inside it: `..` climbs
+    out of it, a leading slash discards it entirely, and a DOI-shaped id
+    quietly nests one work directory inside another.
+    """
+    value = (paper_id or "").strip()
+    if not value:
+        raise ValueError("an id cannot be empty")
+    if value in (".", ".."):
+        raise ValueError(f"{value!r} is not an id")
+    if "/" in value or "\\" in value or os.sep in value:
+        raise ValueError(
+            f"id {value!r} holds a path separator; ids name one directory, "
+            f"so a DOI or a path cannot be one")
+    if value.startswith("."):
+        raise ValueError(f"id {value!r} starts with a dot")
+    return value
 
 
 def content_words(text: str) -> set[str]:
@@ -106,11 +159,21 @@ def surnames(raw: str) -> set[str]:
     orders agree on.
     """
     found = set()
-    for chunk in re.split(r"[;&]|\band\b", raw or ""):
+    for chunk in re.split(r"[;,&]|\band\b", raw or ""):
         match = re.search(r"[A-Za-z][A-Za-z'\-]{2,}", chunk)
         if match:
             found.add(match.group(0).lower())
     return found
+
+
+def surname_printed(name: str, page_words: set[str]) -> bool:
+    """Whether a surname appears among the page's words.
+
+    A hyphenated surname is one author but two words on the page, which
+    the word split separates, so either half standing alone is the
+    author appearing.
+    """
+    return any(part in page_words for part in name.split("-") if part)
 
 
 def read_identity_text(pdf_path: Path, pages: int = IDENTITY_PAGES) -> str:
@@ -166,21 +229,44 @@ def load_registry(path: Path, records_key: str | None = None) -> list[dict]:
             raise ValueError(f"registry {path} has no key {records_key!r}")
         data = data[records_key]
 
-    records = []
+    records, unmatchable, unidentified = [], 0, 0
     if isinstance(data, dict):
         for key, value in data.items():
-            if isinstance(value, dict) and is_matchable(value):
+            if not isinstance(value, dict):
+                continue
+            if is_matchable(value):
                 records.append({**value, "id": str(key)})
+            else:
+                unmatchable += 1
     elif isinstance(data, list):
         for value in data:
-            if (isinstance(value, dict) and value.get("id") is not None
-                    and is_matchable(value)):
+            if not isinstance(value, dict):
+                continue
+            if value.get("id") is None:
+                unidentified += 1
+            elif is_matchable(value):
                 records.append({**value, "id": str(value["id"])})
+            else:
+                unmatchable += 1
+
+    if not records and unidentified:
+        raise ValueError(
+            f"registry {path} holds {unidentified} records, none naming its "
+            f"id in an 'id' field; a list registry names the id in each "
+            f"record, an object registry uses the key")
     if not records:
         raise ValueError(
             f"registry {path} holds no records this tool can match on "
             f"({', '.join(sorted(MATCHABLE_FIELDS))}); pass --records to "
             f"descend into a wrapper key")
+    # Records dropped from a registry that otherwise loaded are the
+    # papers this run cannot match, and their PDFs will come back
+    # ambiguous with nothing to explain why.
+    for count, why in ((unidentified, "no 'id' field"),
+                       (unmatchable, "nothing to match on")):
+        if count:
+            print(f"stage: skipped {count} registry records with {why}",
+                  file=sys.stderr)
     return records
 
 
@@ -194,7 +280,7 @@ def score_record(record: dict, text: str, flat_text: str) -> tuple[float, list]:
     score = 0.0
 
     doi = normalise_doi(str(record.get("doi") or ""))
-    doi_hit = bool(doi) and doi in flat_text
+    doi_hit = doi_printed(doi, flat_text)
     if doi_hit:
         score += DOI_WEIGHT
         reasons.append(f"doi {doi}")
@@ -209,7 +295,7 @@ def score_record(record: dict, text: str, flat_text: str) -> tuple[float, list]:
 
     author_names = surnames(str(record.get("authors") or ""))
     if author_names:
-        hit = len({n for n in author_names if n in page_words})
+        hit = sum(1 for n in author_names if surname_printed(n, page_words))
         share = hit / len(author_names)
         score += AUTHOR_WEIGHT * share
         reasons.append(f"authors {hit}/{len(author_names)}")
@@ -239,8 +325,15 @@ def identify(pdf_path: Path, records: list[dict]) -> dict:
     best = scored[0]
     runner_up = scored[1]["score"] if len(scored) > 1 else 0.0
     margin = best["score"] - runner_up
-    confident = bool(best["doi_hit"]) or (
-        best["title_overlap"] >= TITLE_CONFIDENT and margin >= MARGIN_CONFIDENT)
+    # A tie is never confident, however the score was earned. Two records
+    # carrying one DOI is an ordinary registry defect (a duplicate
+    # import, an original beside its update), and with the DOI decisive
+    # on its own the winner would otherwise be whichever the file
+    # happened to list first.
+    confident = margin > 0 and (
+        bool(best["doi_hit"])
+        or (best["title_overlap"] >= TITLE_CONFIDENT
+            and margin >= MARGIN_CONFIDENT))
 
     return {"pdf": pdf_path, "best": best, "margin": margin,
             "confident": confident, "runners_up": scored[1:3]}
@@ -262,6 +355,7 @@ def stage_one(work_root: Path, paper_id: str, pdf_path: Path) -> str:
     PDF is a stop: overwriting it would convert one paper's pages under
     another paper's name, and the id is what every later stage trusts.
     """
+    paper_id = check_id(paper_id)
     if not pdf_path.is_file():
         raise ValueError(f"no such PDF: {pdf_path}")
     destination = work_root / paper_id / "source.pdf"
@@ -387,7 +481,14 @@ def parse_map_file(path: Path) -> list[tuple[str, Path]]:
         raise ValueError(f"map file is not JSON: {path}: {exc}") from exc
     if not isinstance(data, dict) or not data:
         raise ValueError(f"map file {path} must be a JSON object of id to path")
-    return [(str(k), Path(v)) for k, v in data.items()]
+    pairs = []
+    for key, value in data.items():
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(
+                f"map file {path}: id {key!r} names {value!r} rather than a "
+                f"path to a PDF")
+        pairs.append((str(key), Path(value)))
+    return pairs
 
 
 def main(argv=None) -> int:
@@ -412,8 +513,11 @@ def main(argv=None) -> int:
                         help="key to descend into before reading records")
     args = parser.parse_args(argv)
 
-    modes = [bool(args.id or args.pdf), bool(args.map_file),
-             bool(args.source_dir or args.registry)]
+    # `is not None`, so that an empty --id reaches the check that explains
+    # why an id cannot be empty rather than reading as no --id at all.
+    modes = [args.id is not None or args.pdf is not None,
+             args.map_file is not None,
+             args.source_dir is not None or args.registry is not None]
     if sum(modes) != 1:
         parser.error("choose exactly one of --id/--pdf, --map-file, or "
                      "--from/--registry")
@@ -432,7 +536,7 @@ def main(argv=None) -> int:
         return run_registry(args.work, args.source_dir, args.registry,
                             args.records)
 
-    if not (args.id and args.pdf):
+    if args.id is None or args.pdf is None:
         parser.error("--id and --pdf are used together")
     return run_explicit(args.work, [(args.id, args.pdf)])
 

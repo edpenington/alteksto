@@ -46,11 +46,11 @@ WARDENS = [
 ]
 
 REGISTRY = {
-    "#1013": {"title": "Counting herons in an invented reed bed",
+    "#inv-01": {"title": "Counting herons in an invented reed bed",
               "authors": "Marsh, A. B.; Sluice, C. D.",
               "doi": "https://dx.doi.org/10.1234/herons.2019",
               "year": "2019", "study_id": "Marsh 2019"},
-    "#1702": {"title": "Rostering wardens across an invented estuary",
+    "#inv-02": {"title": "Rostering wardens across an invented estuary",
               "authors": "Warden, E. F.; Estuary, G. H.",
               "doi": "https://dx.doi.org/10.1234/wardens.2021",
               "year": "2021", "study_id": "Warden 2021"},
@@ -69,11 +69,11 @@ def test_explicit_id_stages_under_that_id(stage_tool, tmp_path):
     pdf = make_pdf(tmp_path / "downloads" / "untitled (3).pdf", HERONS)
     work = tmp_path / "work"
 
-    code = stage_tool.main(["--work", str(work), "--id", "#1013",
+    code = stage_tool.main(["--work", str(work), "--id", "#inv-01",
                             "--pdf", str(pdf)])
 
     assert code == 0
-    assert (work / "#1013" / "source.pdf").is_file()
+    assert (work / "#inv-01" / "source.pdf").is_file()
 
 
 def test_missing_pdf_is_a_loud_failure(stage_tool, tmp_path, capsys):
@@ -87,7 +87,7 @@ def test_missing_pdf_is_a_loud_failure(stage_tool, tmp_path, capsys):
 def test_restaging_the_same_pdf_resumes(stage_tool, tmp_path, capsys):
     pdf = make_pdf(tmp_path / "in" / "paper.pdf", HERONS)
     work = tmp_path / "work"
-    argv = ["--work", str(work), "--id", "#1013", "--pdf", str(pdf)]
+    argv = ["--work", str(work), "--id", "#inv-01", "--pdf", str(pdf)]
     assert stage_tool.main(argv) == 0
     capsys.readouterr()
 
@@ -99,11 +99,11 @@ def test_a_different_pdf_under_a_staged_id_stops(stage_tool, tmp_path, capsys):
     work = tmp_path / "work"
     first = make_pdf(tmp_path / "in" / "one.pdf", HERONS)
     second = make_pdf(tmp_path / "in" / "two.pdf", WARDENS)
-    assert stage_tool.main(["--work", str(work), "--id", "#1013",
+    assert stage_tool.main(["--work", str(work), "--id", "#inv-01",
                             "--pdf", str(first)]) == 0
     capsys.readouterr()
 
-    code = stage_tool.main(["--work", str(work), "--id", "#1013",
+    code = stage_tool.main(["--work", str(work), "--id", "#inv-01",
                            "--pdf", str(second)])
 
     assert code == 1
@@ -114,15 +114,15 @@ def test_map_file_stages_many(stage_tool, tmp_path):
     herons = make_pdf(tmp_path / "in" / "a.pdf", HERONS)
     wardens = make_pdf(tmp_path / "in" / "b.pdf", WARDENS)
     map_file = tmp_path / "map.json"
-    map_file.write_text(json.dumps({"#1013": str(herons),
-                                    "#1702": str(wardens)}), encoding="utf-8")
+    map_file.write_text(json.dumps({"#inv-01": str(herons),
+                                    "#inv-02": str(wardens)}), encoding="utf-8")
     work = tmp_path / "work"
 
     code = stage_tool.main(["--work", str(work), "--map-file", str(map_file)])
 
     assert code == 0
-    assert (work / "#1013" / "source.pdf").is_file()
-    assert (work / "#1702" / "source.pdf").is_file()
+    assert (work / "#inv-01" / "source.pdf").is_file()
+    assert (work / "#inv-02" / "source.pdf").is_file()
 
 
 def test_registry_match_ignores_the_filename(stage_tool, tmp_path, capsys):
@@ -136,9 +136,9 @@ def test_registry_match_ignores_the_filename(stage_tool, tmp_path, capsys):
                             "--registry", str(registry)])
 
     assert code == 0
-    assert (work / "#1013" / "source.pdf").is_file()
-    assert not (work / "#1702").exists()
-    assert "#1013" in capsys.readouterr().out
+    assert (work / "#inv-01" / "source.pdf").is_file()
+    assert not (work / "#inv-02").exists()
+    assert "#inv-01" in capsys.readouterr().out
 
 
 def test_the_id_is_the_key_not_a_citation_label(stage_tool, tmp_path, capsys):
@@ -150,7 +150,7 @@ def test_the_id_is_the_key_not_a_citation_label(stage_tool, tmp_path, capsys):
                      str(tmp_path / "staging"), "--registry", str(registry)])
 
     out = capsys.readouterr().out
-    assert "#1013" in out
+    assert "#inv-01" in out
     assert "Marsh 2019" not in out
 
 
@@ -164,7 +164,7 @@ def test_wrapped_registry_needs_records_key(stage_tool, tmp_path, capsys):
     assert "--records" in capsys.readouterr().err
 
     assert stage_tool.main(args + ["--records", "data"]) == 0
-    assert "#1013" in capsys.readouterr().out
+    assert "#inv-01" in capsys.readouterr().out
 
 
 def test_ambiguous_match_stages_nothing(stage_tool, tmp_path, capsys):
@@ -199,7 +199,7 @@ def test_two_pdfs_claiming_one_id_stage_neither(stage_tool, tmp_path, capsys):
                             "--registry", str(registry)])
 
     assert code == 3
-    assert not (work / "#1013").exists()
+    assert not (work / "#inv-01").exists()
     assert "claimed by more than one PDF" in capsys.readouterr().err
 
 
@@ -226,8 +226,8 @@ def test_a_reference_list_does_not_decide_identity(stage_tool, tmp_path):
                             "--registry", str(registry)])
 
     assert code == 0
-    assert (work / "#1013" / "source.pdf").is_file()
-    assert not (work / "#1702").exists()
+    assert (work / "#inv-01" / "source.pdf").is_file()
+    assert not (work / "#inv-02").exists()
 
 
 @pytest.mark.parametrize("bad", ["../escaped", "a/b", "/etc/passwd", "",
@@ -286,8 +286,8 @@ def test_two_records_sharing_a_doi_are_ambiguous(stage_tool, tmp_path, capsys):
     """Registry order must not decide which of a tied pair wins."""
     make_pdf(tmp_path / "staging" / "paper.pdf", HERONS)
     registry = write_registry(tmp_path / "registry.json", records={
-        "#1013": dict(REGISTRY["#1013"]),
-        "#9999": dict(REGISTRY["#1013"]),
+        "#inv-01": dict(REGISTRY["#inv-01"]),
+        "#9999": dict(REGISTRY["#inv-01"]),
     })
     work = tmp_path / "work"
 
@@ -296,7 +296,7 @@ def test_two_records_sharing_a_doi_are_ambiguous(stage_tool, tmp_path, capsys):
                             "--registry", str(registry)])
 
     assert code == 3
-    assert not (work / "#1013").exists()
+    assert not (work / "#inv-01").exists()
     assert not (work / "#9999").exists()
     assert "AMBIGUOUS" in capsys.readouterr().err
 
@@ -304,7 +304,7 @@ def test_two_records_sharing_a_doi_are_ambiguous(stage_tool, tmp_path, capsys):
 def test_a_list_registry_without_ids_says_so(stage_tool, tmp_path, capsys):
     registry = tmp_path / "registry.json"
     registry.write_text(json.dumps(
-        [{"covidence_id": "#1013", "title": "Counting herons in a reed bed",
+        [{"record_id": "#inv-01", "title": "Counting herons in a reed bed",
           "doi": "10.1234/herons.2019"}]), encoding="utf-8")
     make_pdf(tmp_path / "staging" / "paper.pdf", HERONS)
 
@@ -321,7 +321,7 @@ def test_a_list_registry_without_ids_says_so(stage_tool, tmp_path, capsys):
 def test_skipped_registry_records_are_reported(stage_tool, tmp_path, capsys):
     make_pdf(tmp_path / "staging" / "paper.pdf", HERONS)
     registry = write_registry(tmp_path / "registry.json", records={
-        "#1013": dict(REGISTRY["#1013"]),
+        "#inv-01": dict(REGISTRY["#inv-01"]),
         "#dud": {"journal": "An invented journal"},
     })
 
@@ -334,7 +334,7 @@ def test_skipped_registry_records_are_reported(stage_tool, tmp_path, capsys):
 def test_a_map_file_value_that_is_not_a_path_fails_loudly(stage_tool,
                                                           tmp_path, capsys):
     map_file = tmp_path / "map.json"
-    map_file.write_text(json.dumps({"#1013": 5}), encoding="utf-8")
+    map_file.write_text(json.dumps({"#inv-01": 5}), encoding="utf-8")
 
     code = stage_tool.main(["--work", str(tmp_path / "work"),
                             "--map-file", str(map_file)])

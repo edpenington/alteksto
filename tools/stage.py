@@ -2,8 +2,8 @@
 """Put a paper PDF where a converter will find it, under the id it already has.
 
 A conversion is named by the paper's id, and that id belongs to whoever
-asked for the conversion: a review's registry, a spreadsheet, a Covidence
-export. This tool never invents one. It answers the only question the
+asked for the conversion: a review's registry, a spreadsheet, a
+screening tool's export. This tool never invents one. It answers the only question the
 caller cannot answer alone, which is which downloaded file is which
 known paper, and then copies that file to {work}/{id}/source.pdf.
 

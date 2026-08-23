@@ -29,7 +29,14 @@ only hidden OS metadata (dotfiles) is skipped.
 ## manifest.json
 
 A single JSON object. Unknown keys are errors, at the top level and
-inside each exhibit entry.
+inside each exhibit entry. So is a repeated key, at any depth. A JSON
+reader accepts a repeated key and keeps the last value without a word,
+which makes it the one malformation no check downstream of the parse
+can report: the evidence is gone before anything runs. It is refused
+here, where the file is still text. It matters most on `id`, which
+consumers use as the study's identity and as the name of its output
+directory, so a manifest declaring it twice would file a paper's
+results under an identity its author never chose.
 
 | key | required | rule |
 |---|---|---|

@@ -69,6 +69,43 @@ def _is_int(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+class _DuplicateKeyError(ValueError):
+    """A JSON object in the manifest carries the same key twice.
+
+    Private, and caught where the manifest is parsed: validate_bundle
+    reports, it does not raise. A consumer never needs to catch this,
+    because a manifest carrying one cannot pass validation and so never
+    reaches the consumer's own parse.
+    """
+
+    def __init__(self, key):
+        super().__init__(f"duplicate key {key!r}")
+        self.key = key
+
+
+def _reject_duplicate_keys(pairs):
+    """`object_pairs_hook`: build the object, refusing a repeated key.
+
+    This is the one malformation a validator cannot report after the fact,
+    because the parse destroys the evidence: the default hook (`dict`)
+    keeps the last of a repeated key and drops the rest without a word, so
+    by the time any check runs there is nothing left to see. A manifest
+    declaring `id` twice would validate clean under the surviving value,
+    and consumers file a paper's results under the id, so the mistake
+    lands as a study screened or extracted under the wrong identity.
+
+    `json` calls this with each object's `(key, value)` pairs in file
+    order, for every object at every depth, so a duplicate inside an
+    exhibit entry is refused on the same terms as one at the top level.
+    """
+    mapping = {}
+    for key, value in pairs:
+        if key in mapping:
+            raise _DuplicateKeyError(key)
+        mapping[key] = value
+    return mapping
+
+
 def validate_bundle(path) -> list[str]:
     """Return a list of ALL problems with the bundle at path.
 
@@ -111,7 +148,11 @@ def _validate_manifest(root: Path):
     except (OSError, UnicodeDecodeError) as exc:
         return [f"manifest.json could not be read as UTF-8: {exc}"], None
     try:
-        data = json.loads(raw)
+        data = json.loads(raw, object_pairs_hook=_reject_duplicate_keys)
+    except _DuplicateKeyError as exc:
+        return [f"manifest.json has a duplicate key: {exc.key!r}; one of "
+                f"the two values is dropped at parse time, so what the "
+                f"manifest declares cannot be recovered"], None
     except json.JSONDecodeError as exc:
         return [f"manifest.json is not valid JSON: {exc}"], None
     if not isinstance(data, dict):

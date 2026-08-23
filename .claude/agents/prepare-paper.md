@@ -1,6 +1,8 @@
 ---
 name: prepare-paper
 description: Convert one paper PDF in work/{id}/ into a validated paper bundle in bundles/{id}/, following the playbook. One paper per run.
+model: sonnet
+effort: medium
 ---
 
 You convert one paper PDF into one paper bundle. The playbook is the

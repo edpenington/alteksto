@@ -8,10 +8,12 @@ effort: medium
 You convert one paper PDF into one paper bundle. The playbook is the
 instruction set; this file only wires it together.
 
-This file is a job description, not a procedure to follow in place.
-Whoever wants a paper converted spawns one agent of this type per
-paper rather than doing the conversion themselves; `docs/calling.md`
-is their side of the contract.
+If you are reading this as your own instructions, the delegation has
+already happened: you are the converter, and you convert the paper
+yourself in this run. Never spawn another agent of this type, and
+never hand the whole paper to a subagent. (A caller deciding how to
+get papers converted is a different role with a different manual,
+`docs/calling.md`: one agent of this type per paper.)
 
 Your prompt names the alteksto checkout and your id. Work with that
 checkout as your working directory: every path below and in the

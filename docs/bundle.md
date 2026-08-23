@@ -4,7 +4,9 @@ This repository owns the paper bundle format. The specification below
 is normative: `tools/validate_bundle.py` enforces it, the playbook
 produces to it, and downstream consumers (*meltiro* first among them)
 read it. The format evolves here, by a `schema_version` bump, and
-consumers follow.
+consumers follow. A rule that tightens what was always malformed, and
+so refuses nothing a correct bundle contains, does not move the
+version: no bundle that was right becomes wrong.
 
 The format is at `schema_version` 2. A bundle declares that version and
 a consumer accepts it; a bundle declaring any other version is not a
@@ -29,14 +31,18 @@ only hidden OS metadata (dotfiles) is skipped.
 ## manifest.json
 
 A single JSON object. Unknown keys are errors, at the top level and
-inside each exhibit entry. So is a repeated key, at any depth. A JSON
-reader accepts a repeated key and keeps the last value without a word,
-which makes it the one malformation no check downstream of the parse
-can report: the evidence is gone before anything runs. It is refused
-here, where the file is still text. It matters most on `id`, which
-consumers use as the study's identity and as the name of its output
-directory, so a manifest declaring it twice would file a paper's
-results under an identity its author never chose.
+inside each exhibit entry. So is a repeated key, at any depth. Python's
+`json`, like most readers, keeps the last value of a repeated key and
+drops the rest without a word, which makes it the one malformation no
+check after the parse can report: the evidence is gone before anything
+runs. It is refused during the parse, the last moment both values still
+exist. Keys are compared after JSON string unescaping, so `\u0069d` and
+`id` are the same key. Every repeated key in the file is named, with
+its position, and the manifest's other rules are still checked: what
+they say about the rest of the file is true whatever the duplicate
+resolved to. The rule matters most on `id`, since a manifest declaring
+it twice carries the paper into a consumer under whichever value
+happened to come last.
 
 | key | required | rule |
 |---|---|---|

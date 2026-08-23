@@ -15,10 +15,10 @@ Fix what it names and run it again, in a loop, until it passes clean.
 Typical failures and their fixes: a declared label without its PNG or a
 PNG without its declaration (the figure stage miscounted; go back to
 it); an unknown manifest key (only the contract's keys exist); a
-missing required key (id, title, exhibits, schema_version); a key
-written twice (the manifest is hand-authored, so keep the value the
-paper supports and delete the other, rather than assuming the second
-one won).
+missing required key (id, title, exhibits, schema_version); a
+duplicate manifest key (the validator says which key and where; the
+manifest is hand-authored, so keep the value the paper supports and
+delete the other, rather than assuming the surviving one is right).
 
 Validation says nothing about text fidelity or crop quality. Passing
 gate 1 means the bundle is well-formed, nothing more.

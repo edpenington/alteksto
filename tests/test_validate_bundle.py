@@ -233,44 +233,85 @@ def test_a_duplicated_manifest_key_is_rejected(tmp_path):
     """The manifest is written as text, because `json.dumps` cannot
     produce the file this rule is about: a duplicate key exists only in
     the bytes, and a Python dict has already lost it.
-
-    Reported as one problem and nothing else, like the other parse
-    failures: the surviving value is not evidence of what the author
-    meant, so validating the rest of the object against it would put
-    findings on the record that the file does not support.
     """
     bundle = make_bundle(tmp_path / "b")
     (bundle / "manifest.json").write_text(
-        '{"schema_version": 2, "id": "smith2020", "title": "A paper", '
-        '"id": "jones2021", "exhibits": []}', encoding="utf-8")
+        '{"schema_version": 2, "id": "inv-01", "title": "An invented paper", '
+        '"id": "inv-02", "exhibits": []}', encoding="utf-8")
     problems = validate_bundle(bundle)
-    assert len(problems) == 1 and "duplicate key: 'id'" in problems[0]
+    assert len(problems) == 1
+    assert "manifest.json has a duplicate key: 'id'" in problems[0]
 
 
-def test_a_duplicated_key_inside_an_exhibit_is_rejected(tmp_path):
-    # The hook runs on every object in the document, not just the root, so
-    # an exhibit entry declaring two captions is refused on the same terms.
+def test_a_duplicated_key_inside_an_exhibit_is_located(tmp_path):
+    # The hook runs on every object in the document, not just the root, and
+    # the problem says which entry, as every other exhibit problem does.
     bundle = make_bundle(tmp_path / "b", figures=("table_01",))
     (bundle / "manifest.json").write_text(
         '{"schema_version": 2, "id": "inv-01", "title": "An invented paper", '
-        '"exhibits": [{"label": "table_01", "caption": "First", '
-        '"caption": "Second"}]}', encoding="utf-8")
+        '"exhibits": [{"label": "table_01", "caption": "Herons at dawn", '
+        '"caption": "Herons at dusk"}]}', encoding="utf-8")
     problems = validate_bundle(bundle)
-    assert any("duplicate key: 'caption'" in p for p in problems)
+    assert len(problems) == 1
+    assert ("manifest.json exhibits[0] has a duplicate key: 'caption'"
+            in problems[0])
+
+
+def test_every_duplicate_is_named_and_the_rest_is_still_checked(tmp_path):
+    """A duplicate hides neither the ones after it nor anything else.
+
+    Two reasons. The parser finishes an exhibit entry before the object
+    holding it, so reporting the first duplicate it finds would name the
+    caption and never reach the id, the key this rule exists for. And the
+    file's other problems are still true of it, so an author fixing the
+    manifest sees them in one run of gate 1 rather than one per run.
+
+    The id is written three times to pin that a key is one problem however
+    often it repeats.
+    """
+    bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+    (bundle / "manifest.json").write_text(
+        '{"schema_version": 2, "id": "inv-01", "id": "inv-02", '
+        '"id": "inv-03", "warden": "not a manifest key", '
+        '"exhibits": [{"label": "table_01", "caption": "Herons at dawn", '
+        '"caption": "Herons at dusk"}]}', encoding="utf-8")
+    problems = validate_bundle(bundle)
+    named = [p for p in problems if "duplicate key" in p]
+    assert len(named) == 2
+    assert "manifest.json has a duplicate key: 'id'" in named[0]
+    assert ("manifest.json exhibits[0] has a duplicate key: 'caption'"
+            in named[1])
+    assert any("unknown key: 'warden'" in p for p in problems)
+    assert any("missing required key: 'title'" in p for p in problems)
 
 
 def test_a_repeated_key_is_not_confused_with_a_repeated_value(tmp_path):
-    # Two exhibits carrying the same caption text is ordinary (two panels
-    # of one figure often print alike); the rule is about one object
-    # carrying one key twice, and must not catch this.
+    # A guard against a false positive, so it passes with or without the
+    # rule: two exhibits carrying the same caption text is ordinary (two
+    # panels of one figure often print alike), and the rule is about one
+    # object carrying one key twice.
     bundle = make_bundle(tmp_path / "b", figures=("table_01", "table_02"))
     manifest = json.loads((bundle / "manifest.json").read_text())
     manifest["exhibits"] = [
-        {"label": "table_01", "caption": "Baseline characteristics"},
-        {"label": "table_02", "caption": "Baseline characteristics"},
+        {"label": "table_01", "caption": "Heron counts by reed bed"},
+        {"label": "table_02", "caption": "Heron counts by reed bed"},
     ]
     (bundle / "manifest.json").write_text(json.dumps(manifest))
     assert validate_bundle(bundle) == []
+
+
+def test_a_manifest_nested_too_deeply_to_walk_is_still_reported(tmp_path):
+    # The duplicate is found at the top of a structure far deeper than the
+    # interpreter's recursion limit. Locating it must report, not raise:
+    # validate_bundle never raises for a malformed bundle.
+    deep = "[" * 5000 + "]" * 5000
+    bundle = make_bundle(tmp_path / "b")
+    (bundle / "manifest.json").write_text(
+        '{"schema_version": 2, "id": "inv-01", "title": "An invented paper", '
+        '"id": "inv-02", "exhibits": [], "warden": ' + deep + '}',
+        encoding="utf-8")
+    problems = validate_bundle(bundle)
+    assert any("duplicate key: 'id'" in p for p in problems)
 
 
 def test_exhibit_entries_take_label_caption_and_optional_notes(tmp_path):

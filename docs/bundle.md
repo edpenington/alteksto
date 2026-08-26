@@ -13,7 +13,10 @@ a consumer accepts it; a bundle declaring any other version is not a
 bundle. Version 3 adds `tables/`, the optional transcriptions described
 below, and changes nothing else: a correct version 2 bundle becomes a
 correct version 3 bundle by changing the integer, because everything the
-new version adds is optional. The bump is not about what a producer must
+new version adds is optional. `tools/bump_schema.py` does that to
+existing bundles, editing the integer and nothing else and validating
+each one afterwards, so a bundle that needs more than a version bump is
+reported rather than left declaring a conformance it does not have. The bump is not about what a producer must
 now write. It is about what a consumer may now rely on, which is that a
 `tables/` directory has been checked rather than ignored as the
 paperwork any bundle is free to carry.

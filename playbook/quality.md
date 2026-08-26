@@ -166,6 +166,10 @@ then the witness that causes them.
   Footnote lines transcribed as a final row for the same reason.
 - Spanning group headers given the wrong `colspan`, so the header sits
   over the wrong columns while every cell is individually correct.
+- A rowspan widened to silence a reported hole. The validator refuses a
+  span reaching past the last row for exactly this reason: it makes the
+  complaint go away and leaves the missing row missing, and the right
+  and wrong versions draw identically, so the render cannot catch it.
 - Footnote markers fused into counts ("N = 2,0891") when the marker is
   read off the layer rather than seen as a superscript on the crop.
 - Numbers silently improved: a range tidied, a decimal aligned, a

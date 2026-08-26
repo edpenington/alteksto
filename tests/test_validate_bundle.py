@@ -8,6 +8,7 @@ asserts the validator names it.
 import ast
 import json
 import sys
+import time
 import tomllib
 from pathlib import Path
 
@@ -748,6 +749,107 @@ class TestTableFiles:
         (bundle / "tables" / ".DS_Store").write_bytes(b"\x00")
         (bundle / "tables" / "notes.txt").write_text("x", encoding="utf-8")
         assert list(table_files(bundle)) == ["table_01"]
+
+
+# ------------------------------------ what a wrong table must not survive
+
+def test_a_rowspan_may_not_reach_past_the_last_row(tmp_path):
+    """The way round the tiling rule, closed.
+
+    A row that went missing leaves a hole, and the obvious move for
+    silencing a hole is to widen the rowspan above it. That tiles
+    perfectly and the row is still gone, and the two files draw
+    identically, so the render cannot catch it either.
+    """
+    printed = ("<table><tr><th>Season</th><th>n</th></tr>"
+               "<tr><td>April</td><td>142</td></tr>"
+               "<tr><td>July</td><td>88</td></tr></table>")
+    assert validate_table_html(printed, "t.html") == []
+    hidden = ('<table><tr><th>Season</th><th>n</th></tr>'
+              '<tr><td rowspan="2">April</td>'
+              '<td rowspan="2">142</td></tr></table>')
+    problems = validate_table_html(hidden, "t.html")
+    assert any("rowspan reaching row 2 when the table writes 2 rows" in p
+               for p in problems), problems
+
+
+def test_an_overhanging_rowspan_does_not_invent_rows_to_complain_about(
+        tmp_path):
+    """The diagnostics stay coherent: two rows written, two rows judged."""
+    markup = ('<table><tr><td>a</td></tr>'
+              '<tr><td rowspan="3">b</td><td>c</td></tr></table>')
+    problems = validate_table_html(markup, "t.html")
+    assert any("2 by 2 table" in p for p in problems), problems
+    assert not any("row 3" in p for p in problems), problems
+
+
+def test_a_grid_beyond_the_limit_is_refused_cheaply(tmp_path):
+    """A sub-kilobyte file may not buy tens of millions of positions.
+
+    Gate 1 runs the validator on every conversion and render_table.py runs
+    it before it draws, so unbounded work here is unbounded work there.
+    """
+    row = "<tr>" + '<td colspan="1000">x</td>' * 20 + "</tr>"
+    markup = "<table>" + row * 30 + "</table>"
+    started = time.perf_counter()
+    problems = validate_table_html(markup, "t.html")
+    assert time.perf_counter() - started < 2.0
+    assert any("beyond the 100000 positions" in p for p in problems), problems
+
+
+def test_a_real_table_of_five_hundred_rows_is_not_near_the_limit(tmp_path):
+    markup = ("<table>"
+              + "".join(f"<tr><td>Row {n}</td><td>{n}</td></tr>"
+                        for n in range(500))
+              + "</table>")
+    assert validate_table_html(markup, "t.html") == []
+
+
+def test_a_marked_section_is_refused_rather_than_dropped(tmp_path):
+    """`html.parser` drops these silently, and parsers disagree on them.
+
+    The second case reads as one cell here and as two under libxml2, so
+    accepting it would make the tiling verdict a claim about one parser
+    rather than about the file.
+    """
+    for markup in ("<table><tr><td>4.8<![CDATA[ hidden ]]></td>"
+                   "<td>3.1</td></tr></table>",
+                   "<table><tr><td>A<![CDATA[</td><td>]]>B</td></tr></table>"):
+        problems = validate_table_html(markup, "t.html")
+        assert any("marked section" in p for p in problems), (markup,
+                                                              problems)
+
+
+@pytest.mark.parametrize("span", ["²", "٢"])
+def test_a_span_that_is_not_an_ascii_number_is_refused(span):
+    """`isdigit` is true of both and `int` agrees with neither usefully.
+
+    The superscript raises inside the parse, and the Arabic-Indic digit
+    converts to 2 here while a renderer reading HTML's ASCII-only rule
+    reads 1. Either way the grid validated is not the grid laid out.
+    """
+    markup = f'<table><tr><td colspan="{span}">a</td></tr></table>'
+    problems = validate_table_html(markup, "t.html")
+    assert any("a span is a positive whole number" in p
+               for p in problems), problems
+
+
+def test_a_bad_span_does_not_abort_the_rest_of_the_file():
+    """The module promises every problem at once, so it owes them here."""
+    markup = ('<table><tr><td colspan="²">a</td></tr>'
+              '<tr><td style="x">b</td></tr></table>')
+    problems = validate_table_html(markup, "t.html")
+    assert any("a span is a positive whole number" in p for p in problems)
+    assert any("the attribute 'style'" in p for p in problems), problems
+
+
+def test_a_byte_order_mark_is_not_content(tmp_path):
+    """It survives a UTF-8 read and the exhibit does not print it."""
+    bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+    (bundle / "tables").mkdir()
+    (bundle / "tables" / "table_01.html").write_text("﻿" + TABLE_STUB,
+                                                     encoding="utf-8")
+    assert validate_bundle(bundle) == []
 
 
 def test_validate_table_html_is_the_rule_a_tool_can_reuse():

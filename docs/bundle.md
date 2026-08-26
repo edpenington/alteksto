@@ -136,7 +136,10 @@ to path, the way `figure_files` does for crops.
 ### What one file holds
 
 Exactly one `<table>` element and nothing around it: no document, no
-declaration, no comment. Within it:
+declaration, no comment, no marked section. That last one is named
+because parsers disagree about where a marked section ends, so the same
+bytes could give the validator and a consumer different cells. Within
+it:
 
 - **Elements**: `table`, `thead`, `tbody`, `tr`, `th`, `td`, and inside
   a cell `sup`, `sub`, `br`, `em`, `strong`. Nothing else. `caption` is
@@ -156,6 +159,18 @@ declaration, no comment. Within it:
   makes a transcription worth having: both faults read plausibly and
   both put a value in a column it does not belong in, and neither is
   visible to a reader of the markup.
+- **A span may not reach past the last row.** A reader clips a rowspan
+  to the rows that exist, and so does this: a rowspan claiming rows the
+  table never writes is an error, not a taller table. The rule earns
+  its place by closing the obvious way round the one above, which is to
+  silence a hole by widening the rowspan over it. That tiles perfectly
+  and the missing row stays missing, and because the two files draw
+  identically it is invisible to the render as well.
+- **Limits.** One span is at most 1000, and the grid it describes at
+  most 100,000 positions. No printed exhibit approaches either, and
+  without them a file well under a kilobyte can describe tens of
+  millions of positions, which is work a bundle should not be able to
+  ask of the validator that gates every conversion.
 - **Cell text is the characters the exhibit prints**, on the same terms
   text.md holds the paper's: transcribed as printed, typos included. A
   cell the exhibit leaves empty is an empty cell here, never a dash
@@ -187,7 +202,12 @@ row passes; a text.md with a fabricated paragraph passes; a paper full
 of tables with an empty (but declared) exhibit list passes. A
 transcription whose grid tiles perfectly while every number in it is
 invented passes too, and so does one attached to an exhibit that is a
-photograph. Those are held by the producing route's gates (the
+photograph. The tiling rule is narrower than it sounds in one specific
+way worth knowing: it catches a cell that leaves its row short, but a
+cell dropped and absorbed by a neighbour's `colspan` still tiles, and
+cell merging is a common way a table is misread. That one is the
+render's to catch, because a merged cell and two cells do not draw
+alike. Those are held by the producing route's gates (the
 playbook) and by whoever reads the bundle, not by this contract.
 
 The transcription is the place where that gap matters most, because

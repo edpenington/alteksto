@@ -11,6 +11,7 @@ The PDF is built into tmp and thrown away, as the fixture rule requires.
 
 import importlib.util
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -354,27 +355,34 @@ def test_the_manifest_is_the_paper_s_own_identity(manifest, skeleton):
     assert manifest["summary"] == builder.ABSTRACT
 
 
-def test_the_table_transcription_is_the_printed_table(manifest):
-    """The committed transcription says what the paper prints.
+def test_the_table_transcription_is_the_printed_table():
+    """The committed transcription is the printed table, cell for cell.
 
-    Read off `build_pdf.py`'s own constants rather than retyped here, so
-    a change to the printed table that the transcription does not follow
-    fails rather than passing quietly. The caption and the footnote are
-    checked to be absent: the crop shows both, and both belong elsewhere
-    in the bundle, so transcribing them would put a second copy in front
-    of a consumer.
+    Rebuilt from build_pdf.py's own constants and compared whole rather
+    than asked whether each cell appears somewhere. A substring test
+    passes on rows reordered, transposed or duplicated, which are exactly
+    the faults a transcription exists to rule out, so it would assert
+    almost nothing while reading as though it asserted everything.
+
+    Whitespace between tags is normalised and whitespace inside a cell is
+    not: how the file is wrapped is nobody's business, and what a cell
+    says is entirely the point.
     """
     markup = (EXPECTED / "bundle" / "tables" / "table_01.html").read_text(
         encoding="utf-8")
     assert validate_table_html(markup, "table_01.html") == []
-    for cell in builder.TABLE_HEADER:
-        assert f"<th scope=\"col\">{cell}</th>" in markup
-    for row in builder.TABLE_ROWS:
-        for cell in row:
-            assert f"<td>{cell}</td>" in markup
+    header = "".join(f'<th scope="col">{cell}</th>'
+                     for cell in builder.TABLE_HEADER)
+    body = "".join("<tr>" + "".join(f"<td>{cell}</td>" for cell in row)
+                   + "</tr>" for row in builder.TABLE_ROWS)
+    expected = (f"<table><thead><tr>{header}</tr></thead>"
+                f"<tbody>{body}</tbody></table>")
+    assert re.sub(r">\s+<", "><", markup).strip() == expected
+    # Both are printed inside the crop, and both belong elsewhere in the
+    # bundle, so transcribing either would put a second copy in front of a
+    # consumer. The comparison above already forbids them; these say why.
     assert builder.TABLE_CAPTION not in markup
     assert builder.TABLE_FOOTNOTE not in markup
-    assert "figure_01" not in markup
 
 
 def test_only_the_table_is_transcribed(manifest):

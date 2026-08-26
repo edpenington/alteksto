@@ -55,12 +55,16 @@ th { background: #eee; }
 """
 # Points of white kept around the laid-out table.
 PAD = 8
-# The height the table is laid out into, and the ceiling it may grow to
+# The frame the table is laid out into, and the ceilings it may grow to
 # before the tool gives up. A story that does not fit is grown rather than
-# broken across pages: one exhibit is one picture, because a comparison
-# against one crop is what the output is for.
+# broken or cut: one exhibit is one picture, because a comparison against
+# one crop is what the output is for, and a picture missing its right-hand
+# columns is worse than no picture. A comparison against it either reads
+# as a transcription that dropped them, sending an author to mangle a
+# correct table, or gets waved through.
 START_HEIGHT = 1400.0
 MAX_HEIGHT = 40000.0
+MAX_WIDTH = 20000.0
 
 
 def content_box(page):
@@ -92,29 +96,45 @@ def content_box(page):
 def render(source: str, width: float, dpi: int, rotate: int = 0):
     """Lay the markup out and return a pixmap of the table alone.
 
-    Returns None when nothing is drawn at all. Raises ValueError when the
-    table will not fit inside MAX_HEIGHT, rather than quietly handing back
-    its first page: one exhibit is one picture, because one crop is what
-    the picture gets compared against.
+    Grows the frame in both directions until the whole table is inside it.
+    Vertical overflow the story reports itself; horizontal overflow it does
+    not, so it is measured from what was drawn. Returns None when nothing
+    is drawn at all, and raises ValueError rather than handing back a
+    picture that is only part of the table.
     """
     height = START_HEIGHT
-    while height <= MAX_HEIGHT:
-        story = pymupdf.Story(html=source, user_css=TABLE_CSS)
+    while True:
         page = pymupdf.Rect(0, 0, width + 2 * PAD, height)
         buffer = io.BytesIO()
         writer = pymupdf.DocumentWriter(buffer)
         device = writer.begin_page(page)
+        story = pymupdf.Story(html=source, user_css=TABLE_CSS)
         more, _ = story.place(page + (PAD, PAD, -PAD, -PAD))
         story.draw(device)
         writer.end_page()
         writer.close()
         if more:
-            height *= 2
+            if height >= MAX_HEIGHT:
+                raise ValueError(
+                    f"the table did not fit in {MAX_HEIGHT:.0f} points of "
+                    f"height; either it is not a table or it is far "
+                    f"larger than any exhibit")
+            height = min(height * 2, MAX_HEIGHT)
             continue
         document = pymupdf.open("pdf", buffer.getvalue())
         drawn = content_box(document[0])
         if drawn is None or drawn.width <= 0 or drawn.height <= 0:
             return None
+        # Half a point of tolerance, so a rule that lands exactly on the
+        # frame edge is inside it rather than a reason to lay out again.
+        if drawn.x1 > width + PAD + 0.5:
+            if width >= MAX_WIDTH:
+                raise ValueError(
+                    f"the table did not fit in {MAX_WIDTH:.0f} points of "
+                    f"width; either it is not a table or it holds a cell "
+                    f"that cannot be broken across lines")
+            width = min(width * 2, MAX_WIDTH)
+            continue
         clip = (drawn + (-PAD, -PAD, PAD, PAD)) & document[0].rect
         # Rotation is applied by the render matrix rather than to a saved
         # image, so a turned render is drawn at full resolution rather than
@@ -122,9 +142,6 @@ def render(source: str, width: float, dpi: int, rotate: int = 0):
         zoom = dpi / 72.0
         matrix = pymupdf.Matrix(zoom, zoom).prerotate(rotate)
         return document[0].get_pixmap(matrix=matrix, clip=clip)
-    raise ValueError(
-        f"the table did not fit in {MAX_HEIGHT:.0f} points of height; "
-        f"either it is not a table or it is far larger than any exhibit")
 
 
 def main(argv=None) -> int:

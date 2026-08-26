@@ -94,6 +94,14 @@ _TABLE_ATTRIBUTES = {
 # without a bound a malformed `rowspan="99999999"` would have the grid below
 # allocate until the process died. A bundle is input, so it gets a limit.
 _SPAN_LIMIT = 1000
+# And an upper bound on the grid those spans describe, which the span limit
+# alone does not give: twenty cells of `colspan="1000"` beside one
+# `rowspan="1000"` is a 26 KB file describing twenty million positions, and
+# walking them to report the holes is work a bundle should not be able to
+# ask for. Gate 1 runs this on every conversion and `render_table.py` runs
+# it before it draws, so the bound is what keeps both cheap. No printed
+# exhibit comes near it.
+_GRID_LIMIT = 100_000
 
 # Manifest field contract: name -> (required?, type, allow_empty?). `str`
 # covers the JSON string type; bool is deliberately not a valid int (see
@@ -567,6 +575,10 @@ def validate_table_html(source: str, where: str) -> list[str]:
     check here knows whether the numbers are the paper's, which is the
     round trip's job and then the sweep's.
     """
+    # A byte order mark survives a UTF-8 read and is not a character the
+    # exhibit prints, so it is dropped rather than reported as text outside
+    # a cell, which is a true statement that helps nobody.
+    source = source.lstrip("\ufeff")
     if not source.strip():
         return [f"{where} is empty; an exhibit with no transcription omits "
                 f"the file rather than supplying an empty one"]
@@ -677,6 +689,20 @@ class _TableHTMLParser(HTMLParser):
         self._problem("carries a processing instruction; the file is one "
                       "<table> element, not an HTML document")
 
+    def unknown_decl(self, data):
+        """A marked section, `<![CDATA[...]]>` chief among them.
+
+        The base class drops these without a word, which would make the
+        content invisible here and leave the grid a claim about this
+        parser's reading rather than about the file. It is worse than
+        invisible: `html.parser` ends a marked section at `]]>` and the
+        HTML5 bogus-comment rule ends it at the first `>`, so the same
+        bytes can give this parser and a consumer's different cells.
+        """
+        self._problem("carries a marked section (<![...]>); the file is "
+                      "one <table> element, and parsers disagree about "
+                      "where a marked section ends")
+
     # -- the rules -----------------------------------------------------
 
     def _check_element(self, tag, attrs):
@@ -758,7 +784,12 @@ class _TableHTMLParser(HTMLParser):
         if name not in values:
             return 1
         raw = values[name]
-        if raw is None or not raw.isdigit():
+        # `isdigit` is true of superscript and non-Latin digits, and `int`
+        # disagrees with it on both: "\u00b2" raises where this said it
+        # would not, and "\u0662" converts to 2 where a renderer reading
+        # HTML's ASCII-only rule for a non-negative integer reads 1. Either
+        # way the grid this validates is not the grid a consumer lays out.
+        if raw is None or not (raw.isascii() and raw.isdigit()):
             self._problem(f"gives <{tag}> {name}={raw!r}; a span is a "
                           f"positive whole number")
             return 1
@@ -816,8 +847,28 @@ class _TableHTMLParser(HTMLParser):
             problems.append(f"{self.where} has no cells in row {row}; a "
                             f"row either carries cells or is covered by a "
                             f"span from the rows above it")
+        problems.extend(self._overhang_problems())
         problems.extend(self._grid_problems())
         return problems
+
+    def _overhang_problems(self) -> list[str]:
+        """A rowspan claiming rows the table never writes.
+
+        A reader clips a rowspan to the rows that exist. Taking it at its
+        word instead would make the table as tall as the span says, and
+        then a row that went missing can be hidden by widening the rowspan
+        above it: the grid tiles perfectly and the data is gone. That is
+        the worst thing this parser could do, because bumping a span is
+        exactly what an author reaches for to silence a hole.
+        """
+        rows = self.rows_opened
+        beyond = sorted({row for row, _ in self.occupied if row >= rows})
+        if not beyond:
+            return []
+        return [f"{self.where} has a rowspan reaching row {beyond[0]} when "
+                f"the table writes {rows} rows; a span cannot claim rows "
+                f"that are not there, and widening one to cover a row that "
+                f"went missing hides it rather than fixing it"]
 
     def _grid_problems(self) -> list[str]:
         """The positions the occupancy map is left without a cell.
@@ -827,10 +878,22 @@ class _TableHTMLParser(HTMLParser):
         and a hundred lines of it would bury the file's other problems
         rather than adding to them.
         """
-        rows = max(self.rows_opened,
-                   max((row for row, _ in self.occupied), default=-1) + 1)
-        columns = max((column for _, column in self.occupied),
-                      default=-1) + 1
+        rows = self.rows_opened
+        within = [position for position in self.occupied
+                  if position[0] < rows]
+        columns = max((column for _, column in within), default=-1) + 1
+        if not rows or not columns:
+            return []
+        # Bounded before it is walked. Without this a file well under a
+        # kilobyte can describe tens of millions of positions, and the walk
+        # below would be the whole cost of validating the bundle.
+        if rows * columns > _GRID_LIMIT:
+            return [f"{self.where} describes a {rows} by {columns} grid, "
+                    f"beyond the {_GRID_LIMIT} positions this format "
+                    f"allows; no printed exhibit is this size, so the "
+                    f"spans are wrong rather than the table being large"]
+        if len(within) == rows * columns:
+            return []
         holes = [(row, column)
                  for row in range(rows)
                  for column in range(columns)

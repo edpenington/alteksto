@@ -120,6 +120,56 @@ def test_nonsense_dimensions_are_refused(render_table_tool, tmp_path,
     assert "must be positive" in capsys.readouterr().err
 
 
+def test_a_wide_table_grows_the_frame_rather_than_being_cut(
+        render_table_tool, tmp_path):
+    """The failure this replaces was silent and exited zero.
+
+    `place()` reports vertical overflow and says nothing about
+    horizontal, so a table wider than the frame used to come back with
+    its right-hand columns simply absent and a success line naming the
+    truncated size. A comparison against that either reads as a
+    transcription that dropped those columns, sending an author to
+    mangle a correct table, or gets waved through.
+    """
+    header = "".join(f"<th>Column {n}</th>" for n in range(40))
+    values = "".join(f"<td>{n}</td>" for n in range(40))
+    source = write(tmp_path, f"<table><tr>{header}</tr>"
+                             f"<tr>{values}</tr></table>")
+    out = tmp_path / "wide.png"
+    assert render_table_tool.main([str(source), "--out", str(out),
+                                   "--width", "760", "--dpi", "150"]) == 0
+    pix = pymupdf.Pixmap(str(out))
+    # Wider than the frame it was first laid out in, which it can only be
+    # if the frame grew instead of the table being clipped to it.
+    assert pix.width > 760 * 150 / 72
+
+
+def test_an_unbreakable_cell_widens_the_frame(render_table_tool, tmp_path):
+    source = write(tmp_path, "<table><tr><th>Compound</th><th>n</th></tr>"
+                             f"<tr><td>{'Aaaaaaaaaa' * 24}</td>"
+                             "<td>142</td></tr></table>")
+    out = tmp_path / "unbreakable.png"
+    assert render_table_tool.main([str(source), "--out", str(out)]) == 0
+    assert pymupdf.Pixmap(str(out)).width > 760 * 150 / 72
+
+
+def test_a_table_taller_than_the_first_frame_still_renders(
+        render_table_tool, tmp_path):
+    """The growth loop reaches its stated ceiling.
+
+    Doubling from the starting height used to stop at 22400 points while
+    the message named 40000, so a long but perfectly correct
+    transcription was refused and the operator was sent looking for a
+    table that is not a table.
+    """
+    rows = "".join(f"<tr><td>Row {n}</td><td>{n}</td></tr>"
+                   for n in range(1200))
+    source = write(tmp_path, f"<table>{rows}</table>")
+    out = tmp_path / "verylong.png"
+    assert render_table_tool.main([str(source), "--out", str(out)]) == 0
+    assert pymupdf.Pixmap(str(out)).height > 20000
+
+
 def test_a_long_table_grows_the_page_rather_than_splitting(
         render_table_tool, tmp_path):
     """One exhibit is one picture, because one crop is what it faces.

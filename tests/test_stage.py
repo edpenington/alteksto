@@ -359,3 +359,44 @@ def test_mode_flags_are_exclusive(stage_tool, tmp_path):
 def test_normalise_doi_strips_the_resolver(stage_tool):
     assert stage_tool.normalise_doi("https://dx.doi.org/10.1/A") == "10.1/a"
     assert stage_tool.normalise_doi("doi: 10.1/a") == "10.1/a"
+
+
+def test_a_supplement_is_staged_under_its_paper(stage_tool, tmp_path):
+    """A supplement is a paper-like unit under the paper it belongs to,
+    so it is staged the same way and lands beside it rather than in it."""
+    pdf = make_pdf(tmp_path / "supp.pdf", "An invented supplement")
+    work = tmp_path / "work"
+    assert stage_tool.main(["--id", "R0126", "--pdf", str(pdf),
+                            "--supplement", "supplement_3",
+                            "--work", str(work)]) == 0
+    staged = work / "R0126" / "supplements" / "supplement_3" / "source.pdf"
+    assert staged.is_file()
+    # And the article's own slot is untouched by it.
+    assert not (work / "R0126" / "source.pdf").exists()
+
+
+def test_a_supplement_name_cannot_escape_the_work_directory(stage_tool,
+                                                            tmp_path,
+                                                            capsys):
+    pdf = make_pdf(tmp_path / "supp.pdf", "An invented supplement")
+    assert stage_tool.main(["--id", "R0126", "--pdf", str(pdf),
+                            "--supplement", "../escape",
+                            "--work", str(tmp_path / "work")]) == 1
+    err = capsys.readouterr().err
+    assert "supplement name" in err and "path separator" in err
+
+
+def test_restaging_a_supplement_from_a_different_pdf_is_a_stop(stage_tool,
+                                                               tmp_path,
+                                                               capsys):
+    """The name is what its exhibits are labelled from, so a supplement
+    converted under the wrong name mislabels every one of them."""
+    work = tmp_path / "work"
+    first = make_pdf(tmp_path / "one.pdf", "The first supplement")
+    second = make_pdf(tmp_path / "two.pdf", "A different supplement")
+    argv = ["--id", "R0126", "--supplement", "supplement_3",
+            "--work", str(work), "--pdf"]
+    assert stage_tool.main(argv + [str(first)]) == 0
+    assert stage_tool.main(argv + [str(first)]) == 0  # a rerun resumes
+    assert stage_tool.main(argv + [str(second)]) == 1
+    assert "supplement supplement_3 of id R0126" in capsys.readouterr().err

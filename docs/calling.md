@@ -19,6 +19,14 @@ Per paper: an id, the PDF, and the DOI when known. The DOI enables the
 web witness, and without it the run continues with one fewer witness
 and says so.
 
+Supplementary material, when you have it and want it converted: one
+PDF per supplement, each under a name you choose. The name becomes a
+directory in the bundle and the token a consumer asks that supplement
+by, so name it after what the paper calls it (`supplement_3`,
+`appendix_a`). alteksto never goes looking for a supplement: one that
+was not staged is one the bundle does not carry, and nothing reports
+its absence, because nothing here can know it exists.
+
 The id is yours and alteksto never invents one. It comes from whatever
 registry already names these papers, a review's export or a
 spreadsheet, and it is what every stage after intake trusts: a paper
@@ -32,6 +40,10 @@ the converter looks. When you already know which file is which:
 
     python tools/stage.py --id ID --pdf PATH --work work
     python tools/stage.py --map-file id-to-path.json --work work
+
+A supplement is staged under the paper it belongs to:
+
+    python tools/stage.py --id ID --pdf PATH --supplement NAME --work work
 
 When you have a folder of downloads and a registry that names the
 papers, it matches them for you, scoring each file's front matter
@@ -71,6 +83,13 @@ and not one you make or oversee.
 and `tables/*.html` for the table exhibits whose content could be
 transcribed and checked, specified in `docs/bundle.md`. Everything
 intermediate stays in `work/{id}/` and never enters the bundle.
+
+A paper you staged supplements for also carries `supplements.json` and
+one `supplements/{name}/` per supplement, each holding that
+supplement's own text, crops and transcriptions. The article's
+`manifest.json` and `text.md` are the article's alone and do not move
+when a supplement is added, so a consumer that identifies a paper by
+those bytes is unaffected by supplementary material arriving later.
 
 The run is done when the bundle passes validation and every finding of
 the closing sweep is repaired or explained in

@@ -195,6 +195,35 @@ SPRING_UNCUT = (3.0, 3.4, 3.2, 3.6, 2.6, 3.0)
 
 PAGE_COUNT = 3
 
+# Supplement A: one page, printed separately from the paper and converted
+# as its own thing. It carries the shape the paper's own table does not, a
+# group header spanning two columns over a stub column spanning two rows,
+# and one cell the survey left empty. Its running head differs from the
+# paper's, which is how a reader tells the two documents apart and how the
+# walk knows this furniture is not the article's.
+SUPPLEMENT_NAME = "supplement_a"
+SUPPLEMENT_TITLE = "Supplement A. Station counts by season and compartment"
+SUPPLEMENT_HEAD = "Marrow Levels heron survey: supplementary material"
+SUPPLEMENT_INTRO = (
+    "Counts are given per station rather than pooled, so a reader can see "
+    "the spread the means in Table 1 are drawn from. Station 4 was not "
+    "walked in autumn because the causeway was flooded.")
+SUPPLEMENT_TABLE_LABEL = "Table A1."
+SUPPLEMENT_TABLE_CAPTION = ("Heron counts at each station, by season and "
+                            "compartment type.")
+SUPPLEMENT_GROUPS = ("Spring", "Autumn")
+SUPPLEMENT_SUBHEAD = ("Cut", "Uncut")
+SUPPLEMENT_STUB = "Station"
+SUPPLEMENT_ROWS = (
+    ("1", "5.2", "3.0", "1.8", "3.4"),
+    ("2", "4.4", "3.4", "2.1", "3.1"),
+    ("3", "6.0", "3.2", "2.4", "2.9"),
+    ("4", "3.8", "3.6", "", ""),
+)
+SUPPLEMENT_FOOTNOTE = ("Counts are single dawn visits. Empty cells are "
+                       "stations not walked in that season.")
+SUPPLEMENT_COLUMNS = (94.0, 190.0, 260.0, 340.0, 410.0)
+
 # ------------------------------------------------------------ the type sizes
 
 HEAD_SIZE = 9.0
@@ -614,12 +643,9 @@ def _check_fits(y, limit, what):
 
 # ---------------------------------------------------------------- the paper
 
-def build(out_dir) -> Path:
-    """Write the mini-paper to {out_dir}/source.pdf and return the path."""
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    document = pymupdf.open()
-    for sheet in layout():
+def _draw(document, sheets) -> None:
+    """Put the laid-out sheets on the pages of an open document."""
+    for sheet in sheets:
         page = document.new_page(width=PAGE_WIDTH, height=PAGE_HEIGHT)
         for x0, y0, x1, y1, width in sheet.rules:
             page.draw_line((x0, y0), (x1, y1), color=(0, 0, 0), width=width)
@@ -635,6 +661,84 @@ def build(out_dir) -> Path:
                               fontsize=line.size)
                 x += _FONTS[font].text_length(text, fontsize=line.size)
         writer.write_text(page)
+
+
+def build(out_dir) -> Path:
+    """Write the mini-paper to {out_dir}/source.pdf and return the path."""
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    document = pymupdf.open()
+    _draw(document, layout())
+    path = out_dir / "source.pdf"
+    document.save(path)
+    document.close()
+    return path
+
+
+def supplement_layout():
+    """The one sheet of Supplement A, as data."""
+    sheet = Sheet(1)
+    sheet.line(60.0, SUPPLEMENT_HEAD, size=HEAD_SIZE, role="furniture")
+    y = sheet.line(96.0, SUPPLEMENT_TITLE, size=SECTION_SIZE, base=BOLD,
+                   role="heading")
+    y, _ = sheet.paragraph(y + 22.0, SUPPLEMENT_INTRO, size=BODY_SIZE,
+                           leading=BODY_LEAD)
+    _draw_supplement_table(sheet, y + 30.0)
+    return (sheet,)
+
+
+def _draw_supplement_table(sheet, top) -> None:
+    """The spanning-header table, drawn with real rules.
+
+    Two header rows: the group names span the pair of columns under each,
+    and the stub head sits beside them across both rows. That is the shape
+    a transcription needs colspan and rowspan for, and the shape the
+    paper's own table does not have.
+    """
+    sheet.line(top, f"{SUPPLEMENT_TABLE_LABEL} {SUPPLEMENT_TABLE_CAPTION}",
+               size=CAPTION_SIZE, role="caption")
+    rule_y = top + 12.0
+    sheet.rule(LEFT, rule_y, RIGHT, rule_y)
+    group_y = rule_y + 16.0
+    sheet.line(group_y, SUPPLEMENT_STUB, size=TABLE_SIZE, role="exhibit",
+               x=SUPPLEMENT_COLUMNS[0])
+    for index, group in enumerate(SUPPLEMENT_GROUPS):
+        sheet.line(group_y, group, size=TABLE_SIZE, role="exhibit",
+                   x=SUPPLEMENT_COLUMNS[1 + index * 2])
+        # The span rule under each group name, which is what says the name
+        # belongs to both columns beneath it rather than to one.
+        left = SUPPLEMENT_COLUMNS[1 + index * 2] - 6.0
+        right = SUPPLEMENT_COLUMNS[2 + index * 2] + 44.0
+        sheet.rule(left, group_y + 5.0, right, group_y + 5.0, width=0.5)
+    sub_y = group_y + 16.0
+    for index in range(len(SUPPLEMENT_GROUPS) * len(SUPPLEMENT_SUBHEAD)):
+        sheet.line(sub_y, SUPPLEMENT_SUBHEAD[index % 2], size=TABLE_SIZE,
+                   role="exhibit", x=SUPPLEMENT_COLUMNS[1 + index])
+    head_rule_y = sub_y + 6.0
+    sheet.rule(LEFT, head_rule_y, RIGHT, head_rule_y, width=0.5)
+    for row_index, row in enumerate(SUPPLEMENT_ROWS):
+        y = head_rule_y + 16.0 + row_index * TABLE_ROW_LEAD
+        for column, cell in zip(SUPPLEMENT_COLUMNS, row):
+            if not cell:
+                continue  # the survey printed nothing here, so nothing is drawn
+            sheet.line(y, cell, size=TABLE_SIZE, role="exhibit", x=column)
+    bottom = head_rule_y + 16.0 + len(SUPPLEMENT_ROWS) * TABLE_ROW_LEAD
+    sheet.rule(LEFT, bottom, RIGHT, bottom)
+    sheet.line(bottom + 14.0, SUPPLEMENT_FOOTNOTE, size=TABLE_NOTE_SIZE,
+               role="exhibit")
+
+
+def build_supplement(out_dir) -> Path:
+    """Write Supplement A to {out_dir}/source.pdf and return the path.
+
+    A separate document, because that is what it is: a caller stages it
+    under the paper it belongs to and it is converted as its own
+    paper-like unit, never folded into the article.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    document = pymupdf.open()
+    _draw(document, supplement_layout())
     path = out_dir / "source.pdf"
     document.save(path)
     document.close()
@@ -645,14 +749,27 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="build_pdf.py",
         description="Build the worked example's invented mini-paper as "
-                    "{out_dir}/source.pdf.",
+                    "{out_dir}/source.pdf, and optionally its "
+                    "supplement.",
     )
     parser.add_argument("out_dir", type=Path,
                         help="the directory to write source.pdf into, "
                              "usually a work directory")
+    parser.add_argument("--supplement", action="store_true",
+                        help="also write Supplement A to "
+                             "{out_dir}/supplements/" + SUPPLEMENT_NAME
+                             + "/source.pdf, where a staged supplement "
+                               "would sit")
     args = parser.parse_args(argv)
     path = build(args.out_dir)
     print(f"build-pdf: {PAGE_COUNT} pages -> {path}", file=sys.stderr)
+    if args.supplement:
+        # Where tools/stage.py --supplement would have put it, so the work
+        # directory looks like one a caller staged rather than one this
+        # script invented a shape for.
+        supplement = build_supplement(
+            args.out_dir / "supplements" / SUPPLEMENT_NAME)
+        print(f"build-pdf: 1 page -> {supplement}", file=sys.stderr)
     return 0
 
 

@@ -21,7 +21,11 @@ manifest is hand-authored, so keep the value the paper supports and
 delete the other, rather than assuming the surviving one is right); a
 transcription in `tables/` whose label no exhibit declares, or whose
 cells do not tile their grid (the validator names the position, and a
-hole is a dropped cell or a span one too small).
+hole is a dropped cell or a span one too small); a supplement declared
+with no directory or a directory nobody declared (run
+`assemble_supplements.py` rather than writing supplements.json by
+hand); an exhibit label used twice in one bundle, which a supplement's
+labels avoid by carrying its name.
 
 Validation says nothing about text fidelity or crop quality. Passing
 gate 1 means the bundle is well-formed, nothing more.
@@ -58,6 +62,9 @@ named it, the paper's id, and:
 - the page renders,
 - the table transcriptions and the render of each
   (`work/{id}/table_renders/`), where the bundle has them,
+- every supplement the bundle carries, on the same terms as the
+  article: its text, its crops, its transcriptions, and its own
+  renders under `work/{id}/supplements/{name}/`,
 - the text-layer dump blocks.json with its emphasis runs,
 - the skeleton,
 - triage.json (so it knows which witness was the character source),

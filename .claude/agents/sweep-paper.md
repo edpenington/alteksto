@@ -14,7 +14,9 @@ to it.
 Inputs, all under the paper's directories: the bundle's
 `bundles/{id}/text.md`, `figures/` and `tables/` (the table
 transcriptions, where the bundle has them, each drawn to
-`work/{id}/table_renders/{label}.png`), the renders
+`work/{id}/table_renders/{label}.png`), every `supplements/{name}/`
+the bundle carries with its own text, crops, transcriptions and
+renders, the renders
 `work/{id}/pages/page_NN.png`, `work/{id}/blocks.json` (the text
 layer with its emphasis runs, the cheap character and styling
 witness), `work/{id}/skeleton.json`, `work/{id}/triage.json`, and
@@ -58,5 +60,10 @@ Rules:
   and never styling. A transcription you cannot confirm is reported
   for deletion rather than correction: the crop is the content
   whenever there is no transcription.
+- A supplement is swept on the article's terms, against its own
+  renders under `work/{id}/supplements/{name}/`. Its prose belongs in
+  its own text.md and never in the article's, and its exhibits belong
+  to its own declaration and never to the manifest: prose or an
+  exhibit that crossed between them is a finding.
 - An empty report is a report: say explicitly that you checked every
   page and found nothing.

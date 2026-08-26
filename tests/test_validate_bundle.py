@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from alteksto.bundle import (SCHEMA_VERSION, _walk_objects, figure_files,
-                             table_files, validate_bundle,
+                             supplement_dirs, table_files, validate_bundle,
                              validate_table_html)
 from conftest import load_tool
 
@@ -257,7 +257,8 @@ def test_a_duplicated_manifest_key_is_rejected(tmp_path):
     """
     bundle = make_bundle(tmp_path / "b")
     (bundle / "manifest.json").write_text(
-        '{"schema_version": ' + str(SCHEMA_VERSION) + ', "id": "inv-01", "title": "An invented paper", '
+        f'{{"schema_version": {SCHEMA_VERSION}, '
+        f'"id": "inv-01", "title": "An invented paper", '
         '"id": "inv-02", "exhibits": []}', encoding="utf-8")
     problems = validate_bundle(bundle)
     assert len(problems) == 1
@@ -269,7 +270,8 @@ def test_a_duplicated_key_inside_an_exhibit_is_located(tmp_path):
     # the problem says which entry, as every other exhibit problem does.
     bundle = make_bundle(tmp_path / "b", figures=("table_01",))
     (bundle / "manifest.json").write_text(
-        '{"schema_version": ' + str(SCHEMA_VERSION) + ', "id": "inv-01", "title": "An invented paper", '
+        f'{{"schema_version": {SCHEMA_VERSION}, '
+        f'"id": "inv-01", "title": "An invented paper", '
         '"exhibits": [{"label": "table_01", "caption": "Herons at dawn", '
         '"caption": "Herons at dusk"}]}', encoding="utf-8")
     problems = validate_bundle(bundle)
@@ -292,7 +294,8 @@ def test_every_duplicate_is_named_and_the_rest_is_still_checked(tmp_path):
     """
     bundle = make_bundle(tmp_path / "b", figures=("table_01",))
     (bundle / "manifest.json").write_text(
-        '{"schema_version": ' + str(SCHEMA_VERSION) + ', "id": "inv-01", "id": "inv-02", '
+        f'{{"schema_version": {SCHEMA_VERSION}, '
+        f'"id": "inv-01", "id": "inv-02", '
         '"id": "inv-03", "warden": "not a manifest key", '
         '"exhibits": [{"label": "table_01", "caption": "Herons at dawn", '
         '"caption": "Herons at dusk"}]}', encoding="utf-8")
@@ -324,7 +327,8 @@ def test_a_repeated_key_is_not_confused_with_a_repeated_value(tmp_path):
 def _deeply_nested_manifest(root, depth):
     bundle = make_bundle(root)
     (bundle / "manifest.json").write_text(
-        '{"schema_version": ' + str(SCHEMA_VERSION) + ', "id": "inv-01", "title": "An invented paper", '
+        f'{{"schema_version": {SCHEMA_VERSION}, '
+        f'"id": "inv-01", "title": "An invented paper", '
         '"id": "inv-02", "exhibits": [], "warden": '
         + "[" * depth + "]" * depth + '}',
         encoding="utf-8")
@@ -904,6 +908,270 @@ def test_validate_table_html_is_the_rule_a_tool_can_reuse():
     assert validate_table_html(TABLE_STUB, "t.html") == []
     problems = validate_table_html("<p>not a table</p>", "t.html")
     assert problems and all(p.startswith("t.html") for p in problems)
+
+
+# -------------------------------------------- supplements.json and supplements/
+
+def add_supplement(bundle, name, *, labels=(), title=None, text="# S\n\nProse.",
+                   tables=None):
+    """Put a supplement's directory in place. The declaration is separate,
+    because most of what these tests ask is what happens when the two
+    disagree."""
+    root = bundle / "supplements" / name
+    root.mkdir(parents=True, exist_ok=True)
+    if text is not None:
+        (root / "text.md").write_text(text, encoding="utf-8")
+    if labels:
+        (root / "figures").mkdir(exist_ok=True)
+        for label in labels:
+            (root / "figures" / f"{label}.png").write_bytes(PNG_STUB)
+    if tables:
+        (root / "tables").mkdir(exist_ok=True)
+        for label, markup in tables.items():
+            (root / "tables" / f"{label}.html").write_text(markup,
+                                                           encoding="utf-8")
+    return root
+
+
+def declare_supplements(bundle, entries, paper_id="inv-01"):
+    (bundle / "supplements.json").write_text(
+        json.dumps({"id": paper_id, "supplements": entries}),
+        encoding="utf-8")
+
+
+def entry(name, labels=(), title=None):
+    return {"name": name, "title": title or f"{name}, as printed",
+            "exhibits": [{"label": label, "caption": f"Caption for {label}"}
+                         for label in labels]}
+
+
+def test_a_bundle_with_a_supplement_is_valid(tmp_path):
+    bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+    add_supplement(bundle, "supplement_3",
+                   labels=("supplement_3_table_01",),
+                   tables={"supplement_3_table_01": TABLE_STUB})
+    declare_supplements(bundle, [entry("supplement_3",
+                                       ("supplement_3_table_01",))])
+    assert validate_bundle(bundle) == []
+    assert list(supplement_dirs(bundle)) == ["supplement_3"]
+
+
+def test_a_supplement_of_tables_alone_writes_no_text(tmp_path):
+    """Optional here where it is required for the article: a supplement
+    that prints no prose would have to have some invented for it."""
+    bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+    add_supplement(bundle, "appendix_a", labels=("appendix_a_table_01",),
+                   text=None)
+    declare_supplements(bundle, [entry("appendix_a",
+                                       ("appendix_a_table_01",))])
+    assert validate_bundle(bundle) == []
+
+
+def test_a_supplement_may_hold_no_exhibits(tmp_path):
+    bundle = make_bundle(tmp_path / "b")
+    add_supplement(bundle, "appendix_a")
+    declare_supplements(bundle, [entry("appendix_a")])
+    assert validate_bundle(bundle) == []
+
+
+def test_two_supplements_are_ordinary(tmp_path):
+    bundle = make_bundle(tmp_path / "b")
+    add_supplement(bundle, "appendix_a")
+    add_supplement(bundle, "supplement_3", labels=("supplement_3_fig_01",))
+    declare_supplements(bundle, [entry("appendix_a"),
+                                 entry("supplement_3",
+                                       ("supplement_3_fig_01",))])
+    assert validate_bundle(bundle) == []
+    assert list(supplement_dirs(bundle)) == ["appendix_a", "supplement_3"]
+
+
+def test_a_supplement_directory_needs_its_declaration(tmp_path):
+    bundle = make_bundle(tmp_path / "b")
+    add_supplement(bundle, "appendix_a")
+    problems = validate_bundle(bundle)
+    assert any("there is no supplements.json" in p for p in problems), problems
+
+
+def test_a_declaration_needs_its_directory(tmp_path):
+    bundle = make_bundle(tmp_path / "b")
+    declare_supplements(bundle, [entry("appendix_a")])
+    problems = validate_bundle(bundle)
+    assert any("there is no supplements/appendix_a/" in p
+               for p in problems), problems
+
+
+def test_an_undeclared_supplement_directory_is_refused(tmp_path):
+    bundle = make_bundle(tmp_path / "b")
+    add_supplement(bundle, "appendix_a")
+    add_supplement(bundle, "sneaked_in")
+    declare_supplements(bundle, [entry("appendix_a")])
+    problems = validate_bundle(bundle)
+    assert any("supplements/sneaked_in/ is not declared" in p
+               for p in problems), problems
+
+
+def test_the_declaration_carries_the_paper_s_own_id(tmp_path):
+    """A declaration copied between bundles is otherwise undetectable."""
+    bundle = make_bundle(tmp_path / "b")
+    add_supplement(bundle, "appendix_a")
+    declare_supplements(bundle, [entry("appendix_a")], paper_id="inv-99")
+    problems = validate_bundle(bundle)
+    assert any("is not the manifest's 'inv-01'" in p for p in problems), problems
+
+
+def test_a_declaration_of_no_supplements_is_a_mistake(tmp_path):
+    """Absence is the assertion, so an empty list is a second place to
+    keep in step and says nothing the missing file does not."""
+    bundle = make_bundle(tmp_path / "b")
+    declare_supplements(bundle, [])
+    problems = validate_bundle(bundle)
+    assert any("declares no supplements" in p for p in problems), problems
+
+
+@pytest.mark.parametrize("mutate, expected", [
+    (lambda e: e.pop("title"), "missing required key: 'title'"),
+    (lambda e: e.pop("name"), "missing required key: 'name'"),
+    (lambda e: e.pop("exhibits"), "missing required key: 'exhibits'"),
+    (lambda e: e.update(warden="a heron"), "unknown key: 'warden'"),
+    (lambda e: e.update(title=""), "key 'title' must be a non-empty string"),
+    (lambda e: e.update(name="a/b"), "must match ^[A-Za-z0-9._-]+$"),
+    (lambda e: e.update(title=7), "key 'title' must be a string"),
+])
+def test_a_supplement_entry_is_name_title_and_exhibits(tmp_path, mutate,
+                                                       expected):
+    bundle = make_bundle(tmp_path / "b")
+    add_supplement(bundle, "appendix_a")
+    declared = entry("appendix_a")
+    mutate(declared)
+    declare_supplements(bundle, [declared])
+    problems = validate_bundle(bundle)
+    assert any(expected in p for p in problems), problems
+
+
+def test_a_supplement_name_is_declared_once(tmp_path):
+    bundle = make_bundle(tmp_path / "b")
+    add_supplement(bundle, "appendix_a")
+    declare_supplements(bundle, [entry("appendix_a"), entry("appendix_a")])
+    problems = validate_bundle(bundle)
+    assert any("declared more than once" in p for p in problems), problems
+
+
+def test_supplements_holds_directories_only(tmp_path):
+    bundle = make_bundle(tmp_path / "b")
+    add_supplement(bundle, "appendix_a")
+    declare_supplements(bundle, [entry("appendix_a")])
+    (bundle / "supplements" / "notes.txt").write_text("stray",
+                                                      encoding="utf-8")
+    problems = validate_bundle(bundle)
+    assert any("supplements/ contains a file" in p for p in problems), problems
+
+
+def test_a_duplicate_key_in_the_declaration_is_refused(tmp_path):
+    bundle = make_bundle(tmp_path / "b")
+    add_supplement(bundle, "appendix_a")
+    (bundle / "supplements.json").write_text(
+        '{"id": "inv-01", "id": "inv-02", "supplements": '
+        '[{"name": "appendix_a", "title": "A", "exhibits": []}]}',
+        encoding="utf-8")
+    problems = validate_bundle(bundle)
+    assert any("supplements.json has a duplicate key: 'id'" in p
+               for p in problems), problems
+
+
+# ------------------------------------------- one label, one exhibit
+
+def test_a_supplement_may_not_reuse_an_article_label(tmp_path):
+    """A consumer's whole citation is the label, looked up in a flat map,
+    so two exhibits with one name resolve to whichever loaded second."""
+    bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+    add_supplement(bundle, "appendix_a", labels=("table_01",))
+    declare_supplements(bundle, [entry("appendix_a", ("table_01",))])
+    problems = validate_bundle(bundle)
+    assert any("which manifest.json already declares" in p
+               for p in problems), problems
+
+
+def test_two_supplements_may_not_share_a_label(tmp_path):
+    bundle = make_bundle(tmp_path / "b")
+    add_supplement(bundle, "appendix_a", labels=("shared_01",))
+    add_supplement(bundle, "supplement_3", labels=("shared_01",))
+    declare_supplements(bundle, [entry("appendix_a", ("shared_01",)),
+                                 entry("supplement_3", ("shared_01",))])
+    problems = validate_bundle(bundle)
+    assert any("which supplement 'appendix_a' already declares" in p
+               for p in problems), problems
+
+
+# ------------------------------------- a supplement's own assets
+
+def test_a_supplement_s_exhibits_are_bound_to_its_own_figures(tmp_path):
+    bundle = make_bundle(tmp_path / "b")
+    add_supplement(bundle, "appendix_a", labels=("appendix_a_table_02",))
+    declare_supplements(bundle, [entry("appendix_a",
+                                       ("appendix_a_table_01",))])
+    problems = validate_bundle(bundle)
+    assert any("there is no supplements/appendix_a/figures/"
+               "appendix_a_table_01.png" in p for p in problems), problems
+    assert any("supplements/appendix_a/figures/appendix_a_table_02.png is "
+               "not declared" in p for p in problems), problems
+
+
+def test_a_supplement_s_transcription_is_held_to_the_same_rules(tmp_path):
+    bundle = make_bundle(tmp_path / "b")
+    add_supplement(bundle, "appendix_a", labels=("appendix_a_table_01",),
+                   tables={"appendix_a_table_01":
+                           '<table><tr><th colspan="2">Wide</th></tr>'
+                           '<tr><td>a</td></tr></table>'})
+    declare_supplements(bundle, [entry("appendix_a",
+                                       ("appendix_a_table_01",))])
+    problems = validate_bundle(bundle)
+    assert any("supplements/appendix_a/tables/appendix_a_table_01.html "
+               "leaves row 1 column 1 uncovered" in p
+               for p in problems), problems
+
+
+def test_a_supplement_s_figures_directory_takes_pngs_only(tmp_path):
+    bundle = make_bundle(tmp_path / "b")
+    root = add_supplement(bundle, "appendix_a",
+                          labels=("appendix_a_table_01",))
+    (root / "figures" / "notes.txt").write_text("stray", encoding="utf-8")
+    declare_supplements(bundle, [entry("appendix_a",
+                                       ("appendix_a_table_01",))])
+    problems = validate_bundle(bundle)
+    assert any("supplements/appendix_a/figures/ contains a non-png file" in p
+               for p in problems), problems
+
+
+def test_an_empty_supplement_text_is_a_mistake_not_a_signal(tmp_path):
+    bundle = make_bundle(tmp_path / "b")
+    add_supplement(bundle, "appendix_a", text="   \n")
+    declare_supplements(bundle, [entry("appendix_a")])
+    problems = validate_bundle(bundle)
+    assert any("supplements/appendix_a/text.md is empty" in p
+               for p in problems), problems
+
+
+class TestSupplementDirs:
+    def test_it_maps_name_to_path_sorted(self, tmp_path):
+        bundle = make_bundle(tmp_path / "b")
+        add_supplement(bundle, "supplement_3")
+        add_supplement(bundle, "appendix_a")
+        found = supplement_dirs(bundle)
+        assert list(found) == ["appendix_a", "supplement_3"]
+        assert found["appendix_a"].name == "appendix_a"
+
+    def test_an_absent_directory_is_no_supplements(self, tmp_path):
+        assert supplement_dirs(make_bundle(tmp_path / "b")) == {}
+
+    def test_a_supplement_s_own_assets_read_with_the_bundle_s_readers(
+            self, tmp_path):
+        """The directory is bundle-shaped so these work on it unchanged."""
+        bundle = make_bundle(tmp_path / "b")
+        root = add_supplement(bundle, "appendix_a",
+                              labels=("appendix_a_table_01",),
+                              tables={"appendix_a_table_01": TABLE_STUB})
+        assert list(figure_files(root)) == ["appendix_a_table_01"]
+        assert list(table_files(root)) == ["appendix_a_table_01"]
 
 
 def test_the_contract_costs_a_consumer_nothing_to_install():

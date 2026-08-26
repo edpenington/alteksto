@@ -15,7 +15,7 @@ what passes here. The load-bearing points:
 - `bundles/{id}/` holds `manifest.json`, `text.md`, `figures/*.png`,
   and optionally `tables/*.html`. Nothing else is read; extra files are
   ignored.
-- The manifest carries `schema_version` (3), `id`, `title`, `exhibits`,
+- The manifest carries `schema_version` (4), `id`, `title`, `exhibits`,
   and optionally `doi` and `summary`. Unknown keys are rejected. Each
   exhibit entry is `{"label", "caption"}` plus optional `notes` (the
   exhibit's printed footnote text); every declared label must have its
@@ -25,6 +25,12 @@ what passes here. The load-bearing points:
   against the crop by the figure stage. It is beside the crop, never
   instead of it. There is no marker for a transcription that was not
   attempted or could not be trusted: the file is there or it is not.
+- Supplementary material is its own thing: `supplements.json` declares
+  it and `supplements/{name}/` holds it, each shaped like the bundle
+  around it. A supplement's prose never joins `text.md` and its
+  exhibits never join the manifest, so the article's identity does not
+  move when a supplement lands. Exhibit labels are unique across the
+  whole bundle, which is why a supplement's carry its name.
 - Extraction evidence is later quoted **verbatim** against text.md,
   markdown syntax included. The formatting rules below keep those
   quotes predictable: what the paper prints is what text.md carries,

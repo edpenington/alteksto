@@ -11,26 +11,37 @@ directory can live in git when `work/` and `bundles/` cannot.
 
 ## Building it
 
-    python examples/build_pdf.py work/example
+    python examples/build_pdf.py work/example --supplement
 
-writes `work/example/source.pdf`, a work directory like any other from
-there on. No PDF is committed: `build_pdf.py` is the source, and the
+writes `work/example/source.pdf` and, with `--supplement`,
+`work/example/supplements/supplement_a/source.pdf` where a staged
+supplement would sit. A work directory like any other from there on. No PDF is committed: `build_pdf.py` is the source, and the
 binary is built whenever it is wanted.
 
 ## What is committed
 
-    build_pdf.py            the paper, as the code that prints it
+    build_pdf.py            the paper and its supplement, as the code
+                            that prints them
     expected/skeleton.json  the inventory stage 3 should arrive at
-    expected/bundle/        text.md, manifest.json and tables/, the
-                            bundle to match
-    expected/crops.json     the crop region for each exhibit
+    expected/bundle/        text.md, manifest.json, tables/ and
+                            supplements/, the bundle to match
+    expected/crops.json     the crop region for each exhibit, the
+                            supplement's under its own key
 
 `expected/bundle/tables/table_01.html` is the printed table as text,
-the transcription a correct figure stage arrives at. The paper prints
-one plain table, so it exercises the format rather than its harder
-shapes; spanning headers, empty cells and the ways a grid can fail to
-tile are covered by `tests/test_validate_bundle.py`, where a wrong
-table can be written down beside the right one.
+the transcription a correct figure stage arrives at. The paper's own
+table is plain, so the supplement prints the harder shape: a group
+header spanning two columns over a stub spanning two rows, and two
+cells the survey left empty. The ways a grid can fail to tile are
+covered by `tests/test_validate_bundle.py`, where a wrong table can be
+written down beside the right one.
+
+`expected/bundle/supplements/` and `expected/bundle/supplements.json`
+are Supplement A converted as its own thing. Its prose is in its own
+text.md and its exhibit is declared in supplements.json, so neither the
+paper's text.md nor its manifest moves when the supplement is added,
+which is what lets a consumer identify the article by those bytes
+whether or not the supplement is there yet.
 
 There is no `expected/bundle/figures/`, because a PNG is a binary.
 `crops.json` records each exhibit's page and box instead, so a run cuts

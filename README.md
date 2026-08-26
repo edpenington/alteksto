@@ -69,6 +69,11 @@ and says so loudly rather than guessing when it cannot.
   transcription back to an image and holding it beside the crop, so a
   consumer can quote a cell instead of sending a model to read the
   rows off pixels.
+- **Supplements**, when any were staged, are converted the same way
+  and kept as their own thing: a supplement's prose never joins the
+  article's text and its exhibits never join the article's manifest,
+  so identifying a paper by those bytes survives a supplement being
+  added later.
 - **Gates** hold the result: `validate_bundle.py` proves the shape,
   a deterministic reference canary resolves any printed DOIs, and a
   fresh-context sweep reads the paper against the renders and reports

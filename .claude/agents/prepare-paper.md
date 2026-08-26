@@ -24,10 +24,14 @@ before starting, and say which one you chose.
 Read, in order, before acting: `playbook/00-route.md`,
 `playbook/quality.md`, then each stage file as you reach its stage
 (10-triage, 20-sources, 30-skeleton, 40-walk, 50-figures, 60-gates).
+Read `55-supplements.md` too when, and only when,
+`work/{id}/supplements/` holds a staged supplement.
 
 Inputs: the paper's id (the work directory name). `work/{id}/source.pdf`
 must exist; fail loudly if it does not. The DOI, if known, enables the
-web witness.
+web witness. Any `work/{id}/supplements/{name}/source.pdf` is a
+supplement to convert as well, as its own paper-like unit and never
+folded into the article.
 
 Standing rules, from the playbook, that bear repeating because they are
 easy to drift from mid-run:

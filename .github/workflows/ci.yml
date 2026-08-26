@@ -67,7 +67,8 @@ jobs:
               assert u.find_spec(absent) is None, f"{absent} unexpectedly installed"
           import json, pathlib, sys
           from alteksto.bundle import (SCHEMA_VERSION, figure_files,
-                                       table_files, validate_bundle)
+                                       supplement_dirs, table_files,
+                                       validate_bundle)
           root = pathlib.Path("bundle")
           (root / "figures").mkdir(parents=True)
           (root / "tables").mkdir(parents=True)
@@ -88,9 +89,35 @@ jobs:
               "exhibits": [{"label": "table_01", "caption": "Table 1.",
                             "notes": "Invented footnote."}],
           }))
+          # A supplement, so the whole shape is exercised on a plain
+          # install: its own directory, its own crop, and the declaration
+          # that binds them.
+          supplement = root / "supplements" / "appendix_a"
+          (supplement / "figures").mkdir(parents=True)
+          (supplement / "text.md").write_text("# Appendix A\n\nProse.\n")
+          (supplement / "figures" / "appendix_a_table_01.png").write_bytes(
+              b"\x89PNG invented")
+          (root / "supplements.json").write_text(json.dumps({
+              "id": "inv-01",
+              "supplements": [{"name": "appendix_a",
+                               "title": "Appendix A. Search strategies",
+                               "exhibits": [{"label": "appendix_a_table_01",
+                                             "caption": "A table."}]}],
+          }))
           assert validate_bundle(root) == [], validate_bundle(root)
           assert list(figure_files(root)) == ["table_01"]
           assert list(table_files(root)) == ["table_01"]
+          assert list(supplement_dirs(root)) == ["appendix_a"]
+          # One label, one exhibit, across the bundle.
+          (root / "supplements.json").write_text(json.dumps({
+              "id": "inv-01",
+              "supplements": [{"name": "appendix_a", "title": "A",
+                               "exhibits": [{"label": "table_01",
+                                             "caption": "A clash."}]}],
+          }))
+          assert any("already declares" in p for p in validate_bundle(root))
+          (root / "supplements.json").unlink()
+          import shutil; shutil.rmtree(root / "supplements")
           # And the grid check refuses a dropped cell with no parser installed.
           (root / "tables" / "table_01.html").write_text(
               "<table><tr><th>a</th><th>b</th></tr>"

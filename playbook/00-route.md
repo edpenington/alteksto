@@ -8,11 +8,14 @@ spawn one converter per paper and stop reading here.
 One paper PDF becomes one paper bundle: markdown full text, cropped
 figures and tables, a manifest, passing validate-bundle against the
 format this repo owns (docs/bundle.md). The conversion runs in six
-stages:
+stages, with a seventh that runs only when there is supplementary
+material to convert:
 
-    triage -> acquire -> skeleton -> walk -> figures -> gates
+    triage -> acquire -> skeleton -> walk -> figures -> [supplements] -> gates
 
-Each stage has its own file in this directory. `quality.md` describes
+Each stage has its own file in this directory. Supplements are
+`55-supplements.md`, between figures and gates: the gates cover the
+whole bundle, supplements included, so they run last. `quality.md` describes
 what a good bundle looks like and catalogues the defects to expect; read
 it before starting and hold it in mind throughout.
 
@@ -36,13 +39,17 @@ the bundle:
       exhibit_dumps/       raw text-layer blocks under each crop region
       table_renders/       each table transcription drawn, for comparison
                            against its crop
+      supplements/{name}/  one per staged supplement, holding its own
+                           source.pdf and the same intermediates again,
+                           plus declaration.json, what it holds
       refs-report.md       the reference canary's verdicts
       sweep-report.md      the fresh-context sweep's findings
 
 The bundle lands in `bundles/{id}/` as `manifest.json`, `text.md`,
 `figures/*.png`, and `tables/*.html` for the table exhibits whose
 content was transcribed and checked, exactly per the contract (see
-quality.md).
+quality.md). A paper with supplementary material also carries
+`supplements.json` and one `supplements/{name}/` per supplement.
 
 ## Rules that span every stage
 
@@ -83,7 +90,7 @@ quality.md).
 Each tool does one thing to one work directory and exits. Run them
 through the project venv.
 
-    python tools/stage.py --id ID --pdf PATH --work work
+    python tools/stage.py --id ID --pdf PATH [--supplement NAME] --work work
     python tools/render_pages.py work/{id} [--dpi 150]
     python tools/dump_blocks.py work/{id}
     python tools/ocr.py work/{id} [--transport fake]
@@ -92,6 +99,7 @@ through the project venv.
         [--box ...] [--space W H] --out bundles/{id}/figures/{label}.png
     python tools/render_table.py bundles/{id}/tables/{label}.html
         --out work/{id}/table_renders/{label}.png [--rotate 90]
+    python tools/assemble_supplements.py work/{id} --bundle bundles/{id}
     python tools/validate_bundle.py bundles/{id}
     python tools/check_refs.py work/{id} --text bundles/{id}/text.md
 

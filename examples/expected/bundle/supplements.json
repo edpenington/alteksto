@@ -1,0 +1,16 @@
+{
+  "id": "example",
+  "supplements": [
+    {
+      "name": "supplement_a",
+      "title": "Supplement A. Station counts by season and compartment",
+      "exhibits": [
+        {
+          "label": "supplement_a_table_01",
+          "caption": "Heron counts at each station, by season and compartment type.",
+          "notes": "Counts are single dawn visits. Empty cells are stations not walked in that season."
+        }
+      ]
+    }
+  ]
+}

@@ -7,18 +7,63 @@
     {
       "label": "table_01",
       "page": 2,
-      "space": [595, 842],
-      "boxes": [[82, 406, 478, 522]],
+      "space": [
+        595,
+        842
+      ],
+      "boxes": [
+        [
+          82,
+          406,
+          478,
+          522
+        ]
+      ],
       "includes": "the top rule, which the caption sits directly above, the header row and its rule, the three body rows, the bottom rule, and the printed footnote line",
       "excludes": "the caption, which belongs to text.md, and the paragraphs above and below the float"
     },
     {
       "label": "figure_01",
       "page": 3,
-      "space": [595, 842],
-      "boxes": [[111, 308, 478, 452]],
+      "space": [
+        595,
+        842
+      ],
+      "boxes": [
+        [
+          111,
+          308,
+          478,
+          452
+        ]
+      ],
       "includes": "the figure's own printed title, the legend riding beside it, both axes with their tick labels, the twelve bars, and the axis label under them",
       "excludes": "the caption below the figure, which belongs to text.md"
     }
-  ]
+  ],
+  "supplements": {
+    "supplement_a": {
+      "note": "The crop region for Supplement A's only exhibit, in the supplement's own PDF rather than the paper's. The region starts above the table's top rule and ends below its printed footnote, both of which are part of the exhibit, and stops short of the caption, which belongs to the supplement's text.md.",
+      "exhibits": [
+        {
+          "label": "supplement_a_table_01",
+          "page": 1,
+          "space": [
+            595,
+            842
+          ],
+          "boxes": [
+            [
+              84.0,
+              209.0,
+              511.0,
+              351.0
+            ]
+          ],
+          "includes": "the top rule, both header rows with the span rules that tie each group name to its pair of columns, the four station rows including the two cells the survey left empty, the bottom rule, and the printed footnote line",
+          "excludes": "the caption above the top rule, which belongs to the supplement's text.md, and the running head and intro paragraph above it"
+        }
+      ]
+    }
+  }
 }

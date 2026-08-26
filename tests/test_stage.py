@@ -400,3 +400,42 @@ def test_restaging_a_supplement_from_a_different_pdf_is_a_stop(stage_tool,
     assert stage_tool.main(argv + [str(first)]) == 0  # a rerun resumes
     assert stage_tool.main(argv + [str(second)]) == 1
     assert "supplement supplement_3 of id R0126" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("extra", [
+    ["--map-file", "MAP"],
+    ["--from", "DIR", "--registry", "REG"],
+])
+def test_supplement_is_refused_where_it_would_be_ignored(stage_tool, tmp_path,
+                                                         extra):
+    """It used to stage the supplement as the article and say "staged".
+
+    main() passed the name only in the explicit mode, so the other two
+    put the supplement's PDF at the paper's own source.pdf. The run that
+    followed converted the supplement as the paper: wrong text, wrong
+    manifest, an id bound to the wrong document, and nothing reporting
+    it anywhere.
+    """
+    argv = ["--work", str(tmp_path / "work"), "--supplement", "supp_a"]
+    for token in extra:
+        argv.append(str(tmp_path / token) if token.isupper() else token)
+    with pytest.raises(SystemExit):
+        stage_tool.main(argv)
+
+
+@pytest.mark.parametrize("name", ["supplement a", "supp#1", "Unite\u0301",
+                                  "..", ""])
+def test_a_supplement_name_the_format_refuses_is_refused_here(stage_tool,
+                                                              tmp_path,
+                                                              capsys, name):
+    """Before the conversion rather than after it.
+
+    The playbook prefixes every one of a supplement's exhibit labels with
+    its name, so a name the format refuses yields a whole set of labels
+    it also refuses, and gate 1 is what would otherwise say so.
+    """
+    pdf = make_pdf(tmp_path / "supp.pdf", "An invented supplement")
+    assert stage_tool.main(["--id", "inv-01", "--pdf", str(pdf),
+                            "--supplement", name,
+                            "--work", str(tmp_path / "work")]) == 1
+    assert "supplement name" in capsys.readouterr().err

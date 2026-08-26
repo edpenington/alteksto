@@ -210,8 +210,15 @@ a consumer told the file exists but is not to be trusted could not.
 
 Optional, and absent together: no `supplements.json` and no
 `supplements/` means the bundle carries the article alone, which is what
-every bundle carried before this version. Either one without the other
-is an error.
+every bundle carried before this version.
+
+A supplement directory with no `supplements.json` beside it is an error,
+and so is a declaration naming a supplement that is not there. An empty
+`supplements/` directory declares nothing and is nothing, so it is not an
+error on its own. `supplements/` holds directories and nothing else: a
+loose file in it is refused whether or not there is a declaration beside
+it, because it is neither a supplement nor a supplement's asset and
+nothing would ever read it.
 
 A supplement is the paper's supplementary material, converted as its own
 thing and kept out of the article. That separation is the whole point of
@@ -257,8 +264,12 @@ on exactly the manifest's terms and for the same reason.
 Each entry carries `name`, `title` and `exhibits`. No other keys.
 
 - `name` names `supplements/<name>/` and is the token a consumer asks
-  for a supplement by, so it obeys the same filename-safe pattern as the
-  id and must be unique within the bundle.
+  for a supplement by, so it obeys the whole of the id's rule, pattern
+  and at least one letter or digit both, and must be unique within the
+  bundle. The second half is not decoration: the name is used directly
+  as a path component, so a supplement named `..` would otherwise send
+  every check below it to the bundle root and report the article's own
+  crops as that supplement's undeclared files.
 - `title` is what the paper calls the supplement, as printed
   ("Supplement 3. Characteristics of included studies"). It is what a
   consumer choosing between supplements chooses on, and `name` alone is

@@ -39,6 +39,27 @@ from pathlib import Path
 DECLARATION_KEYS = ("name", "title", "exhibits")
 
 
+def _reject_duplicates(pairs):
+    """A json object_pairs_hook that refuses a key stated twice.
+
+    The format refuses a repeated key in manifest.json and in
+    supplements.json, because the last value silently wins and the others
+    are gone before any check runs. A declaration is the one route the
+    playbook tells a converter to use, so resolving a duplicate quietly
+    here would launder past that rule exactly the values no later check
+    can contradict: a title, a caption, or an exhibits list that a second
+    one replaced.
+    """
+    mapping = {}
+    for key, value in pairs:
+        if key in mapping:
+            raise ValueError(f"declares {key!r} twice; only the last value "
+                             f"survives a parse, so what was meant here "
+                             f"cannot be recovered")
+        mapping[key] = value
+    return mapping
+
+
 def read_declaration(path: Path, expected_name: str) -> dict:
     """One declaration, or a ValueError naming what is wrong with it."""
     try:
@@ -46,9 +67,11 @@ def read_declaration(path: Path, expected_name: str) -> dict:
     except (OSError, UnicodeDecodeError) as exc:
         raise ValueError(f"{path} could not be read as UTF-8: {exc}")
     try:
-        data = json.loads(raw)
+        data = json.loads(raw, object_pairs_hook=_reject_duplicates)
     except json.JSONDecodeError as exc:
         raise ValueError(f"{path} is not valid JSON: {exc}")
+    except ValueError as exc:
+        raise ValueError(f"{path} {exc}")
     if not isinstance(data, dict):
         raise ValueError(f"{path} must be a JSON object, got "
                          f"{type(data).__name__}")
@@ -80,16 +103,24 @@ def collect(work_dir: Path) -> list[dict]:
     supplements_dir = work_dir / "supplements"
     if not supplements_dir.is_dir():
         return []
+    try:
+        children = sorted(supplements_dir.iterdir())
+    except OSError as exc:
+        raise ValueError(f"{supplements_dir} could not be read: {exc}")
     found = []
-    for child in sorted(supplements_dir.iterdir()):
+    for child in children:
         if child.name.startswith(".") or not child.is_dir():
             continue
         declaration = child / "declaration.json"
-        if not declaration.is_file():
+        if not declaration.exists():
             raise ValueError(
                 f"{child} has no declaration.json; a supplement that has "
                 f"been converted says what it holds, and one that has not "
                 f"is not finished")
+        if not declaration.is_file():
+            # There but not a file, so "has not been converted" would be a
+            # confident and wrong diagnosis of what is in front of it.
+            raise ValueError(f"{declaration} is not a file")
         found.append(read_declaration(declaration, child.name))
     return sorted(found, key=lambda entry: entry["name"])
 

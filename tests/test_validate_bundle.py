@@ -1048,6 +1048,85 @@ def test_a_supplement_entry_is_name_title_and_exhibits(tmp_path, mutate,
     assert any(expected in p for p in problems), problems
 
 
+@pytest.mark.parametrize("value", [None, 0, False, "", {}, "supplement_a"])
+def test_supplements_must_be_a_list_whatever_else_it_is(tmp_path, value):
+    """`null` in particular, which read as an absent key and said nothing.
+
+    An absent key and an explicit null both come back None from a lookup,
+    and only one of them has already been reported, so the null case
+    returned a malformed verdict with no problem attached. Every check
+    downstream is guarded on that verdict, so a bundle whose supplements
+    were wrong five ways validated clean.
+    """
+    bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+    add_supplement(bundle, "ghost", labels=("table_01",))
+    (bundle / "supplements.json").write_text(
+        json.dumps({"id": "inv-01", "supplements": value}), encoding="utf-8")
+    problems = validate_bundle(bundle)
+    assert problems
+    assert any("'supplements' must be a list" in p or
+               "declares no supplements" in p for p in problems), problems
+
+
+def test_a_supplement_name_may_not_be_a_path_component(tmp_path):
+    """`..` resolves to the bundle root, where the article's own files are.
+
+    The pattern alone allows it, which is why the id carries a second
+    check. Without it the walk below reads the article's figures/ and
+    tables/ and reports them as this supplement's undeclared files, at a
+    path no author can open.
+    """
+    bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+    (bundle / "supplements.json").write_text(
+        json.dumps({"id": "inv-01",
+                    "supplements": [{"name": "..", "title": "S",
+                                     "exhibits": []}]}), encoding="utf-8")
+    problems = validate_bundle(bundle)
+    assert any("must contain at least one letter or digit" in p
+               for p in problems), problems
+    assert not any("supplements/../" in p for p in problems), problems
+
+
+def test_a_declared_supplement_with_no_directory_reports_once(tmp_path):
+    """Not once per exhibit: the module's own discipline is that a report
+    is not buried under noise derived from it."""
+    bundle = make_bundle(tmp_path / "b")
+    declare_supplements(bundle, [entry("absent_one",
+                                       tuple(f"absent_one_table_{n:02d}"
+                                             for n in range(6)))])
+    problems = validate_bundle(bundle)
+    assert len(problems) == 1, problems
+    assert "there is no supplements/absent_one/" in problems[0]
+
+
+def test_a_loose_file_under_supplements_is_refused_undeclared_too(tmp_path):
+    """It is neither a supplement nor a supplement's asset either way."""
+    bundle = make_bundle(tmp_path / "b")
+    (bundle / "supplements").mkdir()
+    (bundle / "supplements" / "notes.txt").write_text("stray",
+                                                      encoding="utf-8")
+    problems = validate_bundle(bundle)
+    assert any("supplements/ contains a file" in p for p in problems), problems
+
+
+def test_an_empty_supplements_directory_declares_nothing(tmp_path):
+    bundle = make_bundle(tmp_path / "b")
+    (bundle / "supplements").mkdir()
+    assert validate_bundle(bundle) == []
+
+
+def test_a_duplicate_key_problem_names_the_file_it_is_in(tmp_path):
+    bundle = make_bundle(tmp_path / "b")
+    add_supplement(bundle, "appendix_a")
+    (bundle / "supplements.json").write_text(
+        '{"id": "inv-01", "id": "inv-01", "supplements": '
+        '[{"name": "appendix_a", "title": "A", "exhibits": []}]}',
+        encoding="utf-8")
+    problems = validate_bundle(bundle)
+    assert any("what supplements.json declares here" in p
+               for p in problems), problems
+
+
 def test_a_supplement_name_is_declared_once(tmp_path):
     bundle = make_bundle(tmp_path / "b")
     add_supplement(bundle, "appendix_a")

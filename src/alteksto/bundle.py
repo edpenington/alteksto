@@ -135,6 +135,19 @@ _EXHIBIT_KEYS = ("label", "caption")
 _EXHIBIT_OPTIONAL_KEYS = ("notes",)
 
 
+def is_filename_safe(value) -> bool:
+    """True when a value may name a directory or a file stem in a bundle.
+
+    The rule the id, an exhibit label and a supplement name all obey, in
+    one place so that the producing side can refuse a name before a
+    conversion runs on it rather than after. Staging under a name this
+    rejects means the whole run happens and gate 1 is what finally says
+    so, which is the expensive way to learn it.
+    """
+    return bool(isinstance(value, str) and _ID_PATTERN.match(value)
+                and _ID_ALNUM.search(value))
+
+
 def _is_int(value) -> bool:
     """True for a genuine JSON integer. Rejects bool (a Python int
     subclass) so `schema_version: true` does not sneak through."""
@@ -188,7 +201,11 @@ def _validate_supplement_contents(root: Path, supplements) -> list[str]:
     problems say supplements.json rather than manifest.json.
     """
     problems: list[str] = []
+    present = supplement_dirs(root)
     for name in sorted(supplements):
+        if name not in present:
+            continue  # already reported as declared with no directory, and
+            # walking it would report every one of its exhibits again
         labels = supplements[name]
         supplement = root / "supplements" / name
         prefix = f"supplements/{name}/"
@@ -359,18 +376,21 @@ def _duplicate_key_problems(data, duplicates,
         if keys is None:
             continue
         located.add(id(node))
-        problems.extend(_duplicate_key_problem(where, key) for key in keys)
+        problems.extend(_duplicate_key_problem(where, key, declared_in)
+                        for key in keys)
     for mapping, keys in duplicates:
         if id(mapping) in located:
             continue
         where = f"{declared_in} (in a value another duplicate key replaced)"
-        problems.extend(_duplicate_key_problem(where, key) for key in keys)
+        problems.extend(_duplicate_key_problem(where, key, declared_in)
+                        for key in keys)
     return problems
 
 
-def _duplicate_key_problem(where: str, key: str) -> str:
+def _duplicate_key_problem(where: str, key: str,
+                           declared_in: str = "manifest.json") -> str:
     return (f"{where} has a duplicate key: {key!r}; only the last value "
-            f"survives the parse, so what the manifest declares here "
+            f"survives the parse, so what {declared_in} declares here "
             f"cannot be recovered")
 
 
@@ -1025,13 +1045,17 @@ def _validate_supplements(root: Path, manifest_id):
     """
     declaration = root / "supplements.json"
     present = supplement_dirs(root)
+    stray = _stray_supplement_files(root)
     if not declaration.exists():
         if present:
             return ([f"supplements/ holds {', '.join(sorted(present))} but "
                      f"there is no supplements.json; a supplement reaches a "
-                     f"consumer through the declaration or not at all"],
-                    None)
-        return [], {}
+                     f"consumer through the declaration or not at all"]
+                    + stray, None)
+        # A supplements/ directory holding no supplement is not a
+        # declaration of anything, but a loose file in it is refused on the
+        # same terms it would be with a declaration beside it.
+        return stray, {}
     try:
         raw = declaration.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
@@ -1047,6 +1071,7 @@ def _validate_supplements(root: Path, manifest_id):
                 f"{type(data).__name__}"], None
 
     problems = _duplicate_key_problems(data, duplicates, "supplements.json")
+    problems.extend(stray)
     for key in data:
         if key not in _SUPPLEMENTS_FIELDS:
             problems.append(f"supplements.json has unknown key: {key!r}")
@@ -1069,7 +1094,13 @@ def _validate_supplements(root: Path, manifest_id):
                 f"bundle is of, and carry its identity rather than one of "
                 f"their own")
 
-    declared = _validate_supplement_entries(data.get("supplements"), problems)
+    # `in`, not `.get`: an explicit null and an absent key both come back
+    # None from a lookup, and only one of them has already been reported.
+    # Read as a lookup, `"supplements": null` was accepted in silence.
+    if "supplements" in data:
+        declared = _validate_supplement_entries(data["supplements"], problems)
+    else:
+        declared = None
     if declared is None:
         return problems, None
 
@@ -1080,14 +1111,18 @@ def _validate_supplements(root: Path, manifest_id):
         problems.append(f"supplements/{name}/ is not declared in "
                         f"supplements.json; a supplement a consumer can "
                         f"read is one the bundle vouches for")
-    supplements_dir = root / "supplements"
-    if supplements_dir.is_dir():
-        for child in sorted(supplements_dir.iterdir()):
-            if child.name.startswith(".") or child.is_dir():
-                continue
-            problems.append(f"supplements/ contains a file (each supplement "
-                            f"is a directory): {child.name}")
     return problems, declared
+
+
+def _stray_supplement_files(root: Path) -> list[str]:
+    """Anything under supplements/ that is not a supplement."""
+    supplements_dir = root / "supplements"
+    if not supplements_dir.is_dir():
+        return []
+    return [f"supplements/ contains a file (each supplement is a "
+            f"directory): {child.name}"
+            for child in sorted(supplements_dir.iterdir())
+            if not child.name.startswith(".") and not child.is_dir()]
 
 
 def _validate_supplement_entries(value, problems):
@@ -1096,8 +1131,6 @@ def _validate_supplement_entries(value, problems):
     None when the block is malformed enough that cross-checking it against
     the directories would bury the report under derived noise.
     """
-    if value is None:
-        return None
     if not isinstance(value, list):
         problems.append(f"supplements.json key 'supplements' must be a list "
                         f"of {{name, title, exhibits}} objects, got "
@@ -1154,6 +1187,19 @@ def _validate_supplement_entries(value, problems):
                 f"(letters, digits, dot, underscore, dash only): it names a "
                 f"supplements/ directory and is the token a consumer asks "
                 f"for a supplement by")
+            malformed = True
+            continue
+        if not _ID_ALNUM.search(name):
+            # The same second half of the rule the id gets, and for the same
+            # reason: the name is used directly as a path component, and "."
+            # and ".." resolve to real directories. Without this, a
+            # supplement named ".." sends every check below to the bundle
+            # root, where it reads the article's own figures and reports
+            # them as a supplement's undeclared files.
+            problems.append(
+                f"{where} name {name!r} must contain at least one letter or "
+                f"digit; names like '.' or '..' are rejected because the "
+                f"name is used directly as a filesystem path component")
             malformed = True
             continue
         if name in declared:

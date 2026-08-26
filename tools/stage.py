@@ -51,6 +51,8 @@ from pathlib import Path
 
 import pymupdf
 
+from alteksto.bundle import is_filename_safe
+
 # Front matter: where a paper states its own identity, before the
 # reference list starts describing everybody else's.
 IDENTITY_PAGES = 3
@@ -131,22 +133,49 @@ def check_id(paper_id: str, what: str = "id") -> str:
     out of it, a leading slash discards it entirely, and a DOI-shaped id
     quietly nests one work directory inside another.
 
-    `what` names the thing being checked, because a supplement name is
-    held to the same rule for the same reason and an author told their
-    id is wrong when their supplement name is wrong looks in the wrong
-    place.
+    `what` names the thing being checked, so a message about a supplement
+    name does not send its author looking at their ids.
+
+    This is deliberately looser than the bundle format's own rule for an
+    id: an id arrives from a registry this repository did not write, and
+    what it may look like is that registry's business up to the point
+    where it has to name a directory. A supplement name is not like that
+    (see `check_supplement_name`).
     """
+    article = "an" if what[0] in "aeiou" else "a"
     value = (paper_id or "").strip()
     if not value:
-        raise ValueError(f"an {what} cannot be empty")
+        raise ValueError(f"{article} {what} cannot be empty")
     if value in (".", ".."):
-        raise ValueError(f"{value!r} is not an {what}")
+        raise ValueError(f"{value!r} is not {article} {what}")
     if "/" in value or "\\" in value or os.sep in value:
         raise ValueError(
             f"{what} {value!r} holds a path separator; it names one "
             f"directory, so a DOI or a path cannot be one")
     if value.startswith("."):
         raise ValueError(f"{what} {value!r} starts with a dot")
+    return value
+
+
+def check_supplement_name(name: str) -> str:
+    """The supplement's name, held to the bundle format's own rule.
+
+    Stricter than `check_id`, and not by preference. A supplement name is
+    chosen by the caller rather than inherited from a registry, it names
+    a directory in the finished bundle as well as in the work tree, and
+    the playbook prefixes every one of the supplement's exhibit labels
+    with it. So a name the format refuses yields a whole set of labels it
+    also refuses, and the run finds that out at gate 1, after the
+    conversion. The rule is imported rather than restated, so the two
+    cannot drift.
+    """
+    value = check_id(name, what="supplement name")
+    if not is_filename_safe(value):
+        raise ValueError(
+            f"supplement name {value!r} must match ^[A-Za-z0-9._-]+$ with "
+            f"at least one letter or digit; it names a directory in the "
+            f"bundle too, and every one of the supplement's exhibit labels "
+            f"is prefixed with it")
     return value
 
 
@@ -373,7 +402,7 @@ def stage_one(work_root: Path, paper_id: str, pdf_path: Path,
     if not pdf_path.is_file():
         raise ValueError(f"no such PDF: {pdf_path}")
     if supplement is not None:
-        supplement = check_id(supplement, what="supplement name")
+        supplement = check_supplement_name(supplement)
         destination = (work_root / paper_id / "supplements" / supplement
                        / "source.pdf")
     else:
@@ -549,6 +578,16 @@ def main(argv=None) -> int:
     if sum(modes) != 1:
         parser.error("choose exactly one of --id/--pdf, --map-file, or "
                      "--from/--registry")
+    # A supplement is staged one at a time, under a name only the caller
+    # knows. Accepting the flag alongside a mode that ignores it would put
+    # the supplement's PDF at the article's own source.pdf and say
+    # "staged", and the run that followed would convert the supplement as
+    # the paper: wrong text, wrong manifest, an id bound to the wrong
+    # document, and nothing anywhere reporting it.
+    if args.supplement is not None and (args.map_file or args.source_dir
+                                        or args.registry):
+        parser.error("--supplement is used with --id/--pdf; a supplement is "
+                     "staged one at a time, under the name you give it")
 
     if args.map_file:
         try:

@@ -163,3 +163,37 @@ def test_a_bundle_with_no_manifest_is_a_loud_failure(assemble_tool, tmp_path,
     (bundle / "manifest.json").unlink()
     assert assemble_tool.main([str(work), "--bundle", str(bundle)]) == 1
     assert "no manifest" in capsys.readouterr().err
+
+
+def test_a_duplicate_key_in_a_declaration_is_refused(assemble_tool, tmp_path,
+                                                     capsys):
+    """The one route the playbook tells a converter to use.
+
+    supplements.json refuses a repeated key because the last value wins
+    and the rest are gone before any check runs. Resolving one quietly
+    here would launder past that rule exactly the values nothing later
+    can contradict: a title, a caption, an exhibits list a second one
+    replaced.
+    """
+    work, bundle = make_paper(tmp_path)
+    root = work / "supplements" / "supp_a"
+    root.mkdir(parents=True)
+    (root / "declaration.json").write_text(
+        '{"name": "supp_a", "title": "Supplement A. Station counts", '
+        '"title": "draft heading, replace me", "exhibits": []}',
+        encoding="utf-8")
+    assert assemble_tool.main([str(work), "--bundle", str(bundle)]) == 1
+    assert "declares 'title' twice" in capsys.readouterr().err
+    assert not (bundle / "supplements.json").exists()
+
+
+def test_a_declaration_that_is_there_but_unreadable_is_not_called_missing(
+        assemble_tool, tmp_path, capsys):
+    """"Has not been converted" would be a confident and wrong diagnosis."""
+    work, bundle = make_paper(tmp_path)
+    root = work / "supplements" / "supp_a"
+    (root / "declaration.json").mkdir(parents=True)
+    assert assemble_tool.main([str(work), "--bundle", str(bundle)]) == 1
+    err = capsys.readouterr().err
+    assert "is not a file" in err
+    assert "has no declaration.json" not in err

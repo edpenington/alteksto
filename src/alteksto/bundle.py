@@ -111,12 +111,24 @@ def _validate_manifest(root: Path):
     except (OSError, UnicodeDecodeError) as exc:
         return [f"manifest.json could not be read as UTF-8: {exc}"], None
     try:
-        data = json.loads(raw)
+        data, duplicates = _parse_manifest(raw)
     except json.JSONDecodeError as exc:
         return [f"manifest.json is not valid JSON: {exc}"], None
+    except RecursionError:
+        # The walk below carries its own queue so that depth cannot throw
+        # out of it, but the parse runs first and json's scanner recurses in
+        # C, at a depth that is a property of the interpreter rather than of
+        # this format: 3.11 gives up where later versions keep going. Either
+        # way validate_bundle answers with a problem, because it never
+        # raises for a malformed bundle, and a manifest this deep is
+        # malformed whatever the parser makes of it.
+        return ["manifest.json is nested too deeply to parse; a manifest is "
+                "a flat object with one list of exhibits in it"], None
     if not isinstance(data, dict):
         return [f"manifest.json must be a JSON object, got "
                 f"{type(data).__name__}"], None
+
+    problems.extend(_duplicate_key_problems(data, duplicates))
 
     for key in data:
         if key not in _MANIFEST_FIELDS:
@@ -164,6 +176,109 @@ def _validate_manifest(root: Path):
                         f"rejected because the id is used directly as a "
                         f"filesystem path component")
     return problems, declared_labels
+
+
+def _parse_manifest(raw):
+    """Parse manifest.json, collecting every key an object declares twice.
+
+    Python's json keeps the last value of a repeated key and drops the rest
+    without a word, which makes a duplicate the one malformation nothing
+    after the parse can report: the evidence is gone before any check runs,
+    and a manifest declaring `id` twice would validate clean under whichever
+    value came last.
+
+    So the parse collects duplicates rather than resolving them silently.
+    The hook json calls with each object's (key, value) pairs runs for every
+    object at every depth, so a duplicate inside an exhibit entry is caught
+    alongside one at the top level, and every duplicate in the file is
+    collected rather than the first the parser happens to finish.
+
+    Returns (data, duplicates): the manifest as a plain parse builds it,
+    last value winning, and one (object, repeated keys) pair per object that
+    repeats a key. Validation goes on over that object, so the file's other
+    problems are still reported in the same pass and the duplicate says
+    which of its values cannot be trusted.
+    """
+    duplicates = []
+
+    def collect(pairs):
+        mapping = {}
+        repeated = []
+        for key, value in pairs:
+            if key in mapping and key not in repeated:
+                repeated.append(key)
+            mapping[key] = value
+        if repeated:
+            duplicates.append((mapping, repeated))
+        return mapping
+
+    return json.loads(raw, object_pairs_hook=collect), duplicates
+
+
+def _duplicate_key_problems(data, duplicates) -> list[str]:
+    """One problem per key an object declares twice, saying where it is.
+
+    The hook cannot say that itself: json hands it an object's pairs and
+    nothing about the key that object hangs from. So the parsed manifest is
+    walked afterwards and each collected object matched by identity, which
+    names `manifest.json exhibits[3]` the way every other problem here does,
+    rather than leaving an author to hunt a bare key through a file every
+    tool they own accepts. However many times a key repeats, it is one
+    problem: the file states it more than once, which is the whole of what
+    is wrong.
+
+    An object the walk cannot reach is one that a duplicate elsewhere
+    dropped, so it is reported without a position. The duplicate that
+    dropped it is reported too.
+    """
+    if not duplicates:
+        return []
+    repeated = {id(mapping): keys for mapping, keys in duplicates}
+    problems: list[str] = []
+    located: set[int] = set()
+    for where, node in _walk_objects(data, "manifest.json"):
+        keys = repeated.get(id(node))
+        if keys is None:
+            continue
+        located.add(id(node))
+        problems.extend(_duplicate_key_problem(where, key) for key in keys)
+    for mapping, keys in duplicates:
+        if id(mapping) in located:
+            continue
+        where = "manifest.json (in a value another duplicate key replaced)"
+        problems.extend(_duplicate_key_problem(where, key) for key in keys)
+    return problems
+
+
+def _duplicate_key_problem(where: str, key: str) -> str:
+    return (f"{where} has a duplicate key: {key!r}; only the last value "
+            f"survives the parse, so what the manifest declares here "
+            f"cannot be recovered")
+
+
+def _walk_objects(root, where: str):
+    """Every JSON object under root, with the position that names it.
+
+    Positions read as this module's other problems do: `manifest.json` for
+    the manifest itself, `manifest.json exhibits[3]` for an exhibit entry.
+    The walk carries its own queue rather than recursing, so a manifest
+    nested deeply enough to exhaust the interpreter's stack is still a
+    reported problem and not an exception out of validate_bundle. Breadth
+    first, which for the shapes this format allows is the order the file
+    reads.
+    """
+    queue = [(where, root)]
+    cursor = 0
+    while cursor < len(queue):
+        position, node = queue[cursor]
+        cursor += 1
+        if isinstance(node, dict):
+            yield position, node
+            queue.extend((f"{position} {key}", value)
+                         for key, value in node.items())
+        elif isinstance(node, list):
+            queue.extend((f"{position}[{index}]", item)
+                         for index, item in enumerate(node))
 
 
 def _validate_exhibits(value):

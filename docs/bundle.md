@@ -8,14 +8,18 @@ consumers follow. A rule that tightens what was always malformed, and
 so refuses nothing a correct bundle contains, does not move the
 version: no bundle that was right becomes wrong.
 
-The format is at `schema_version` 3. A bundle declares that version and
+The format is at `schema_version` 4. A bundle declares that version and
 a consumer accepts it; a bundle declaring any other version is not a
-bundle. Version 3 adds `tables/`, the optional transcriptions described
-below, and changes nothing else: a correct version 2 bundle becomes a
-correct version 3 bundle by changing the integer, because everything the
-new version adds is optional. The bump is not about what a producer must
-now write. It is about what a consumer may now rely on, which is that a
-`tables/` directory has been checked rather than ignored as the
+bundle.
+
+Versions 3 and 4 are both additions and nothing else. Version 3 added
+`tables/`, the optional table transcriptions described below; version 4
+added `supplements.json` and `supplements/`, the paper's supplementary
+material carried as its own thing. A correct version 2 bundle becomes a
+correct version 4 bundle by changing the integer, because everything
+either version adds is optional. Neither bump is about what a producer
+must now write. Both are about what a consumer may now rely on, which is
+that these directories have been checked rather than ignored as the
 paperwork any bundle is free to carry.
 
 ## Layout
@@ -25,12 +29,14 @@ are copyrighted, so bundles are never committed; they are produced and
 consumed at run time.
 
     paper-bundle/
-      manifest.json    (required)  identity and the exhibit declaration
-      text.md          (required)  the paper's full text as markdown, UTF-8
-      figures/         (optional)  cropped tables and figures, *.png only
-      tables/          (optional)  table transcriptions, *.html only
+      manifest.json     (required)  identity and the exhibit declaration
+      text.md           (required)  the paper's full text as markdown, UTF-8
+      figures/          (optional)  cropped tables and figures, *.png only
+      tables/           (optional)  table transcriptions, *.html only
+      supplements.json  (optional)  what supplementary material is carried
+      supplements/      (optional)  one directory per supplement
 
-Extra files beside the four contract entries are ignored by consumers,
+Extra files beside the six contract entries are ignored by consumers,
 so a bundle may carry its own paperwork. Inside `figures/` and
 `tables/`, nothing extra is tolerated: a file of the wrong kind or a
 subdirectory is an error, and only hidden OS metadata (dotfiles) is
@@ -54,7 +60,7 @@ happened to come last.
 
 | key | required | rule |
 |---|---|---|
-| schema_version | yes | the integer 3; a JSON boolean is not an integer |
+| schema_version | yes | the integer 4; a JSON boolean is not an integer |
 | id | yes | non-empty string matching `^[A-Za-z0-9._-]+$` with at least one letter or digit |
 | title | yes | non-empty string, the title as printed |
 | exhibits | yes | list of exhibit entries; may be `[]` |
@@ -199,6 +205,112 @@ or unchecked. A file is here or it is not, and one that is here has
 passed this contract and the producing route's gates. A consumer that
 finds no file learns that the crop is the content, which it can act on;
 a consumer told the file exists but is not to be trusted could not.
+
+## supplements.json and supplements/
+
+Optional, and absent together: no `supplements.json` and no
+`supplements/` means the bundle carries the article alone, which is what
+every bundle carried before this version.
+
+A supplement directory with no `supplements.json` beside it is an error,
+and so is a declaration naming a supplement that is not there. An empty
+`supplements/` directory declares nothing and is nothing, so it is not an
+error on its own. `supplements/` holds directories and nothing else: a
+loose file in it is refused whether or not there is a declaration beside
+it, because it is neither a supplement nor a supplement's asset and
+nothing would ever read it.
+
+A supplement is the paper's supplementary material, converted as its own
+thing and kept out of the article. That separation is the whole point of
+the shape, and it is worth saying why, because merging the two would be
+less work.
+
+- **A screening decision must not be re-identified by a supplement
+  arriving.** A review may reasonably judge eligibility from the article
+  and extract data from the supplement, in that order. That order is
+  only available if the article's identity does not move when the
+  supplement lands. `manifest.json` and `text.md` are the article's and
+  stay byte for byte what they were, so a consumer that hashes them, as
+  the screening side does, is untouched. A consumer that reads the whole
+  bundle, as the extraction side does, sees the addition and should.
+- **They are different artefacts.** A supplement is often not reviewed
+  to the article's standard, is versioned separately, and can be revised
+  after publication. A bundle that merged them could not say which of
+  the two a given claim rests on, and for anything that quotes a
+  supplement verbatim that distinction is the claim.
+
+### supplements.json
+
+A single JSON object. Unknown keys are errors, and so is a repeated key,
+on exactly the manifest's terms and for the same reason.
+
+| key | required | rule |
+|---|---|---|
+| id | yes | the manifest's `id`, character for character |
+| supplements | yes | non-empty list of supplement entries |
+
+- The `id` is checked against the manifest's because a declaration
+  copied between bundles is otherwise undetectable, and it would attach
+  one paper's supplements to another paper. A supplement has no identity
+  of its own: no DOI, no title page, no existence apart from the article
+  it belongs to.
+- There is no `schema_version` here. One bundle declares one version,
+  in the manifest, and this file is part of that bundle rather than a
+  document beside it.
+- An empty list is an error, not an assertion. A paper with no
+  supplements omits the file, which says the same thing without a second
+  place to keep in step.
+
+Each entry carries `name`, `title` and `exhibits`. No other keys.
+
+- `name` names `supplements/<name>/` and is the token a consumer asks
+  for a supplement by, so it obeys the whole of the id's rule, pattern
+  and at least one letter or digit both, and must be unique within the
+  bundle. The second half is not decoration: the name is used directly
+  as a path component, so a supplement named `..` would otherwise send
+  every check below it to the bundle root and report the article's own
+  crops as that supplement's undeclared files.
+- `title` is what the paper calls the supplement, as printed
+  ("Supplement 3. Characteristics of included studies"). It is what a
+  consumer choosing between supplements chooses on, and `name` alone is
+  too thin to choose on.
+- `exhibits` is declared on exactly the manifest's terms, `label` and
+  `caption` and optional `notes`, and may be `[]` when the supplement
+  holds no tables or figures.
+
+### supplements/<name>/
+
+Shaped like the bundle around it, minus the identity it does not have:
+
+    supplements/<name>/
+      text.md     (optional)  the supplement's prose, UTF-8, non-empty
+      figures/    (optional)  its crops, on the bundle's rules
+      tables/     (optional)  its transcriptions, on the bundle's rules
+
+`text.md` is optional here where it is required at the top level,
+because a supplement that is nothing but data tables prints no prose and
+inventing one would mean inventing the prose. `figures/` and `tables/`
+are held to what the bundle's own are held to, and bound to the
+supplement's declaration in `supplements.json` the same way and in the
+same directions.
+
+`alteksto.bundle.supplement_dirs(path)` answers which supplements a
+bundle carries, name to path. Handing one of those paths to
+`figure_files` or `table_files` reads that supplement's assets, which is
+why the directory is shaped this way: the functions that read a bundle
+read a supplement unchanged.
+
+### One label, one exhibit, across the whole bundle
+
+An exhibit label must be unique across the article and every supplement,
+not merely within each. A consumer cites an exhibit by its label alone,
+the filename stem being the whole of the citation, and looks it up in
+one flat map. An article `table_01` and a supplement `table_01` are then
+two images with one name, and the citation resolves to whichever was
+loaded second. Nothing downstream is placed to notice, so it is refused
+here, where every label in the bundle is visible at once. Prefixing a
+supplement's labels with its name (`supplement_3_table_01`) is the
+convention that keeps them apart.
 
 ## What validation cannot see
 

@@ -54,6 +54,25 @@ def paper(tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
+def supplement(tmp_path_factory):
+    """Supplement A built, rendered and dumped, as its own paper-like unit.
+
+    Its own work directory, because that is what it gets: a caller stages
+    it under the paper and it is converted separately, never folded in.
+    """
+    work = tmp_path_factory.mktemp("supplement")
+    builder.build_supplement(work)
+    assert load_tool("render_pages").main([str(work)]) == 0
+    assert load_tool("dump_blocks").main([str(work)]) == 0
+    return work
+
+
+@pytest.fixture(scope="module")
+def supplement_crops(crops):
+    return crops["supplements"]["supplement_a"]
+
+
+@pytest.fixture(scope="module")
 def blocks(paper):
     return json.loads((paper / "blocks.json").read_text(encoding="utf-8"))
 
@@ -198,6 +217,35 @@ def test_the_recorded_crops_assemble_a_bundle_that_validates(paper, crops,
     shutil.copy(EXPECTED / "bundle" / "manifest.json",
                 bundle / "manifest.json")
     shutil.copytree(EXPECTED / "bundle" / "tables", bundle / "tables")
+    assert load_tool("validate_bundle").main([str(bundle)]) == 0
+
+
+def test_the_example_assembles_with_its_supplement(paper, supplement, crops,
+                                                   tmp_path):
+    """The whole bundle, article and supplement, judged by the validator.
+
+    The supplement's crop comes out of the supplement's own render, which
+    is the point of the fixture: nothing about it is read off the paper's
+    pages, because it is not printed on them.
+    """
+    bundle = tmp_path / "bundle"
+    (bundle / "figures").mkdir(parents=True)
+    crop = load_tool("crop")
+    for exhibit in crops["exhibits"]:
+        assert crop.main(_crop_argv(exhibit, paper, bundle)) == 0
+    shutil.copy(EXPECTED / "bundle" / "text.md", bundle / "text.md")
+    shutil.copy(EXPECTED / "bundle" / "manifest.json",
+                bundle / "manifest.json")
+    shutil.copytree(EXPECTED / "bundle" / "tables", bundle / "tables")
+    shutil.copytree(EXPECTED / "bundle" / "supplements",
+                    bundle / "supplements")
+    shutil.copy(EXPECTED / "bundle" / "supplements.json",
+                bundle / "supplements.json")
+    supplement_dir = bundle / "supplements" / "supplement_a"
+    (supplement_dir / "figures").mkdir(parents=True, exist_ok=True)
+    for exhibit in crops["supplements"]["supplement_a"]["exhibits"]:
+        assert crop.main(_crop_argv(exhibit, supplement,
+                                    supplement_dir)) == 0
     assert load_tool("validate_bundle").main([str(bundle)]) == 0
 
 
@@ -393,6 +441,100 @@ def test_only_the_table_is_transcribed(manifest):
     declared = {exhibit["label"] for exhibit in manifest["exhibits"]}
     assert transcribed == {"table_01"}
     assert transcribed < declared
+
+
+# ------------------------------------------------------ the supplement
+
+def test_the_supplement_prints_what_the_declaration_claims(supplement):
+    flat = (supplement / "blocks.txt").read_text(encoding="utf-8")
+    for printed in (builder.SUPPLEMENT_TITLE, builder.SUPPLEMENT_INTRO,
+                    builder.SUPPLEMENT_TABLE_CAPTION,
+                    builder.SUPPLEMENT_FOOTNOTE, builder.SUPPLEMENT_HEAD):
+        assert " ".join(printed.split()) in " ".join(flat.split()), printed
+
+
+def test_the_supplement_transcription_is_its_printed_table():
+    """Rebuilt from the builder's constants and compared whole.
+
+    The shape the paper's own table does not have: a group header
+    spanning two columns over a stub spanning two rows, and two cells the
+    survey left empty, which are transcribed as empty rather than
+    dropped or filled with a dash.
+    """
+    markup = (EXPECTED / "bundle" / "supplements" / "supplement_a" /
+              "tables" / "supplement_a_table_01.html").read_text(
+                  encoding="utf-8")
+    assert validate_table_html(markup, "supplement_a_table_01.html") == []
+    groups = "".join(f'<th colspan="2" scope="colgroup">{name}</th>'
+                     for name in builder.SUPPLEMENT_GROUPS)
+    # Cut and Uncut once under each group, which is the second header row.
+    subs = "".join(f'<th scope="col">{name}</th>'
+                   for _ in builder.SUPPLEMENT_GROUPS
+                   for name in builder.SUPPLEMENT_SUBHEAD)
+    body = "".join("<tr>" + "".join(f"<td>{cell}</td>" for cell in row)
+                   + "</tr>" for row in builder.SUPPLEMENT_ROWS)
+    expected = (f'<table><thead><tr><th rowspan="2" scope="col">'
+                f'{builder.SUPPLEMENT_STUB}</th>{groups}</tr>'
+                f"<tr>{subs}</tr></thead><tbody>{body}</tbody></table>")
+    assert re.sub(r">\s+<", "><", markup).strip() == expected
+    assert builder.SUPPLEMENT_TABLE_CAPTION not in markup
+    assert builder.SUPPLEMENT_FOOTNOTE not in markup
+
+
+def test_the_supplement_text_is_the_supplement_s_alone():
+    """Its prose is its own, and the article's is not in it.
+
+    The separation is the whole reason supplements are a directory rather
+    than an appendix to text.md: the article's bytes must not move when a
+    supplement lands.
+    """
+    text = (EXPECTED / "bundle" / "supplements" / "supplement_a" /
+            "text.md").read_text(encoding="utf-8")
+    assert builder.SUPPLEMENT_INTRO in " ".join(text.split())
+    assert "[TABLE A1." in text
+    # Furniture never reaches text.md, the supplement's own included.
+    assert builder.SUPPLEMENT_HEAD not in text
+    # And nothing of the article's.
+    assert builder.TITLE not in text
+    assert builder.ABSTRACT not in text
+
+
+def test_the_article_text_says_nothing_of_the_supplement():
+    text = (EXPECTED / "bundle" / "text.md").read_text(encoding="utf-8")
+    assert builder.SUPPLEMENT_INTRO not in " ".join(text.split())
+    assert "TABLE A1" not in text
+
+
+def test_the_supplement_crop_holds_its_exhibit_and_not_its_caption(
+        supplement_crops):
+    sheet, = builder.supplement_layout()
+    box = supplement_crops["exhibits"][0]["boxes"][0]
+    top_rule = min(rule[1] for rule in sheet.rules)
+    bottom_rule = max(rule[1] for rule in sheet.rules)
+    caption = [line for line in sheet.lines
+               if line.text.startswith("Table A1")][0]
+    footnote = [line for line in sheet.lines
+                if line.text.startswith("Counts are single")][0]
+    assert box[1] < top_rule, "the top rule is part of the table"
+    assert box[3] > bottom_rule, "the bottom rule is part of the table"
+    assert box[3] >= footnote.y, "the printed footnote is part of the exhibit"
+    assert box[1] > caption.y, "the caption belongs to text.md"
+
+
+def test_the_supplement_labels_carry_its_name():
+    """One label, one exhibit, across the bundle: a consumer's citation is
+    the label alone, so the article's table_01 and a supplement's must not
+    collide."""
+    declared = json.loads((EXPECTED / "bundle" / "supplements.json").read_text(
+        encoding="utf-8"))
+    manifest = json.loads((EXPECTED / "bundle" / "manifest.json").read_text(
+        encoding="utf-8"))
+    article = {exhibit["label"] for exhibit in manifest["exhibits"]}
+    assert declared["id"] == manifest["id"]
+    for entry in declared["supplements"]:
+        for exhibit in entry["exhibits"]:
+            assert exhibit["label"].startswith(entry["name"] + "_")
+            assert exhibit["label"] not in article
 
 
 def test_the_manifest_captions_are_the_printed_ones(manifest, skeleton):

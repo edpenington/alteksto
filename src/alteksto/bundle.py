@@ -32,7 +32,7 @@ import re
 from html.parser import HTMLParser
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # `\Z`, not `$`: in Python `$` also matches immediately before a trailing
 # newline, so `^[A-Za-z0-9._-]+$` would accept "1234\n". Both values this
@@ -103,6 +103,15 @@ _SPAN_LIMIT = 1000
 # exhibit comes near it.
 _GRID_LIMIT = 100_000
 
+# supplements.json: the paper's identity, and the supplements it carries.
+# No schema_version of its own; one bundle declares one version, in the
+# manifest, and this file is part of that bundle rather than beside it.
+_SUPPLEMENTS_FIELDS = ("id", "supplements")
+# One supplement entry. `name` is the directory and the token a consumer
+# asks for; `title` is what the paper calls it, which is what a consumer
+# chooses by; `exhibits` is declared on exactly the manifest's terms.
+_SUPPLEMENT_KEYS = ("name", "title", "exhibits")
+
 # Manifest field contract: name -> (required?, type, allow_empty?). `str`
 # covers the JSON string type; bool is deliberately not a valid int (see
 # _is_int) so `schema_version: true` is rejected. `exhibits` has its own
@@ -126,6 +135,19 @@ _EXHIBIT_KEYS = ("label", "caption")
 _EXHIBIT_OPTIONAL_KEYS = ("notes",)
 
 
+def is_filename_safe(value) -> bool:
+    """True when a value may name a directory or a file stem in a bundle.
+
+    The rule the id, an exhibit label and a supplement name all obey, in
+    one place so that the producing side can refuse a name before a
+    conversion runs on it rather than after. Staging under a name this
+    rejects means the whole run happens and gate 1 is what finally says
+    so, which is the expensive way to learn it.
+    """
+    return bool(isinstance(value, str) and _ID_PATTERN.match(value)
+                and _ID_ALNUM.search(value))
+
+
 def _is_int(value) -> bool:
     """True for a genuine JSON integer. Rejects bool (a Python int
     subclass) so `schema_version: true` does not sneak through."""
@@ -144,13 +166,15 @@ def validate_bundle(path) -> list[str]:
         return [f"bundle path is not a directory: {root}"]
 
     problems: list[str] = []
-    manifest_problems, declared = _validate_manifest(root)
+    manifest_problems, declared, paper_id = _validate_manifest(root)
     figure_problems, present = _validate_figures(root)
     table_problems, transcribed = _validate_tables(root)
+    supplement_problems, supplements = _validate_supplements(root, paper_id)
     problems.extend(manifest_problems)
     problems.extend(_validate_text(root))
     problems.extend(figure_problems)
     problems.extend(table_problems)
+    problems.extend(supplement_problems)
     # The cross-checks run only when both sides are themselves well formed:
     # a malformed exhibits block or an unusable figures/ has already been
     # reported, and cross-checking against it would bury that report under
@@ -159,28 +183,67 @@ def validate_bundle(path) -> list[str]:
         problems.extend(_cross_check_exhibits(declared, present))
     if declared is not None and transcribed is not None:
         problems.extend(_cross_check_tables(declared, transcribed))
+    if supplements:
+        problems.extend(_validate_supplement_contents(root, supplements))
+    if declared is not None and supplements:
+        problems.extend(_cross_check_label_uniqueness(declared, supplements))
+    return problems
+
+
+def _validate_supplement_contents(root: Path, supplements) -> list[str]:
+    """Each declared supplement's own text, figures and tables.
+
+    A supplement directory is shaped like the bundle it sits in, so the
+    same checks run over it with only a prefix changed: what is a crop,
+    what is a transcription, and what binds them to a declaration are
+    rules of the format, and a supplement does not get its own version of
+    any of them. Only the declaring file differs, which is why the
+    problems say supplements.json rather than manifest.json.
+    """
+    problems: list[str] = []
+    present = supplement_dirs(root)
+    for name in sorted(supplements):
+        if name not in present:
+            continue  # already reported as declared with no directory, and
+            # walking it would report every one of its exhibits again
+        labels = supplements[name]
+        supplement = root / "supplements" / name
+        prefix = f"supplements/{name}/"
+        figure_problems, present = _validate_figures(supplement, prefix)
+        table_problems, transcribed = _validate_tables(supplement, prefix)
+        problems.extend(_validate_supplement_text(supplement, prefix))
+        problems.extend(figure_problems)
+        problems.extend(table_problems)
+        if present is not None:
+            problems.extend(_cross_check_exhibits(
+                labels, present, prefix, "supplements.json"))
+        if transcribed is not None:
+            problems.extend(_cross_check_tables(
+                labels, transcribed, prefix, "supplements.json"))
     return problems
 
 
 def _validate_manifest(root: Path):
-    """Return (problems, declared_labels) for manifest.json.
+    """Return (problems, declared_labels, id) for manifest.json.
 
     declared_labels is the exhibits labels when the block is structurally
     sound, and None when it is missing or malformed (so the caller skips
-    the cross-checks against figures/).
+    the cross-checks against figures/). The id comes back so that
+    supplements.json can be held to declaring the same one.
     """
     problems: list[str] = []
     manifest_path = root / "manifest.json"
     if not manifest_path.exists():
-        return ["manifest.json is missing"], None
+        return ["manifest.json is missing"], None, None
     try:
         raw = manifest_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
-        return [f"manifest.json could not be read as UTF-8: {exc}"], None
+        return [f"manifest.json could not be read as UTF-8: "
+                f"{exc}"], None, None
     try:
         data, duplicates = _parse_manifest(raw)
     except json.JSONDecodeError as exc:
-        return [f"manifest.json is not valid JSON: {exc}"], None
+        return [f"manifest.json is not valid JSON: {exc}"], None, None
     except RecursionError:
         # The walk below carries its own queue so that depth cannot throw
         # out of it, but the parse runs first and json's scanner recurses in
@@ -190,10 +253,10 @@ def _validate_manifest(root: Path):
         # raises for a malformed bundle, and a manifest this deep is
         # malformed whatever the parser makes of it.
         return ["manifest.json is nested too deeply to parse; a manifest is "
-                "a flat object with one list of exhibits in it"], None
+                "a flat object with one list of exhibits in it"], None, None
     if not isinstance(data, dict):
         return [f"manifest.json must be a JSON object, got "
-                f"{type(data).__name__}"], None
+                f"{type(data).__name__}"], None, None
 
     problems.extend(_duplicate_key_problems(data, duplicates))
 
@@ -242,7 +305,10 @@ def _validate_manifest(root: Path):
                         f"one letter or digit; ids like '.' or '..' are "
                         f"rejected because the id is used directly as a "
                         f"filesystem path component")
-    return problems, declared_labels
+    manifest_id = data.get("id")
+    if not isinstance(manifest_id, str):
+        manifest_id = None
+    return problems, declared_labels, manifest_id
 
 
 def _parse_manifest(raw):
@@ -282,7 +348,8 @@ def _parse_manifest(raw):
     return json.loads(raw, object_pairs_hook=collect), duplicates
 
 
-def _duplicate_key_problems(data, duplicates) -> list[str]:
+def _duplicate_key_problems(data, duplicates,
+                           where="manifest.json") -> list[str]:
     """One problem per key an object declares twice, saying where it is.
 
     The hook cannot say that itself: json hands it an object's pairs and
@@ -303,23 +370,27 @@ def _duplicate_key_problems(data, duplicates) -> list[str]:
     repeated = {id(mapping): keys for mapping, keys in duplicates}
     problems: list[str] = []
     located: set[int] = set()
-    for where, node in _walk_objects(data, "manifest.json"):
+    declared_in = where
+    for where, node in _walk_objects(data, declared_in):
         keys = repeated.get(id(node))
         if keys is None:
             continue
         located.add(id(node))
-        problems.extend(_duplicate_key_problem(where, key) for key in keys)
+        problems.extend(_duplicate_key_problem(where, key, declared_in)
+                        for key in keys)
     for mapping, keys in duplicates:
         if id(mapping) in located:
             continue
-        where = "manifest.json (in a value another duplicate key replaced)"
-        problems.extend(_duplicate_key_problem(where, key) for key in keys)
+        where = f"{declared_in} (in a value another duplicate key replaced)"
+        problems.extend(_duplicate_key_problem(where, key, declared_in)
+                        for key in keys)
     return problems
 
 
-def _duplicate_key_problem(where: str, key: str) -> str:
+def _duplicate_key_problem(where: str, key: str,
+                           declared_in: str = "manifest.json") -> str:
     return (f"{where} has a duplicate key: {key!r}; only the last value "
-            f"survives the parse, so what the manifest declares here "
+            f"survives the parse, so what {declared_in} declares here "
             f"cannot be recovered")
 
 
@@ -348,8 +419,8 @@ def _walk_objects(root, where: str):
                          for index, item in enumerate(node))
 
 
-def _validate_exhibits(value):
-    """Validate the manifest's exhibits value.
+def _validate_exhibits(value, where="manifest.json"):
+    """Validate an exhibits value, the manifest's or a supplement's.
 
     Returns (problems, labels): the declared labels in declaration order,
     and every problem with the block's shape. An empty list is valid and
@@ -357,14 +428,15 @@ def _validate_exhibits(value):
     contains no tables and no figures.
     """
     if not isinstance(value, list):
-        return ([f"manifest.json key 'exhibits' must be a list of "
+        return ([f"{where} key 'exhibits' must be a list of "
                  f"{{label, caption}} objects, got "
                  f"{type(value).__name__}"], [])
     problems: list[str] = []
     labels: list[str] = []
     seen: set[str] = set()
+    declared_in = where
     for index, entry in enumerate(value):
-        where = f"manifest.json exhibits[{index}]"
+        where = f"{declared_in} exhibits[{index}]"
         if not isinstance(entry, dict):
             problems.append(f"{where} must be an object with exactly "
                             f"'label' and 'caption', got "
@@ -413,21 +485,24 @@ def _validate_exhibits(value):
     return problems, labels
 
 
-def _cross_check_exhibits(declared_labels, present_labels) -> list[str]:
-    """Bind the manifest's declaration to figures/. Both directions are
-    hard errors; docs/bundle.md says why."""
+def _cross_check_exhibits(declared_labels, present_labels, prefix="",
+                          declared_in="manifest.json") -> list[str]:
+    """Bind a declaration to its figures/. Both directions are hard
+    errors; docs/bundle.md says why. `prefix` and `declared_in` name the
+    directory and the file that declares it, so a supplement's problems
+    say which supplement and point at supplements.json."""
     problems: list[str] = []
     declared = set(declared_labels)
     present = set(present_labels)
     for label in sorted(declared - present):
         problems.append(
-            f"manifest.json declares exhibit {label!r} but there is no "
-            f"figures/{label}.png")
+            f"{declared_in} declares exhibit {label!r} but there is no "
+            f"{prefix}figures/{label}.png")
     for label in sorted(present - declared):
         problems.append(
-            f"figures/{label}.png is not declared in manifest.json "
-            f"'exhibits'; every supplied image must be declared with its "
-            f"caption")
+            f"{prefix}figures/{label}.png is not declared in "
+            f"{declared_in} 'exhibits'; every supplied image must be "
+            f"declared with its caption")
     return problems
 
 
@@ -505,7 +580,7 @@ def table_files(root) -> dict[str, Path]:
     return {label: found[label] for label in sorted(found)}
 
 
-def _validate_tables(root: Path):
+def _validate_tables(root: Path, prefix: str = ""):
     """Return (problems, transcribed_labels) for the tables/ directory.
 
     transcribed_labels is the label of every transcription table_files
@@ -516,20 +591,21 @@ def _validate_tables(root: Path):
     if not tables_dir.exists():
         return [], []
     if not tables_dir.is_dir():
-        return [f"tables exists but is not a directory: {tables_dir}"], None
+        return [f"{prefix}tables exists but is not a directory: "
+                f"{tables_dir}"], None
     problems: list[str] = []
     for child in sorted(tables_dir.iterdir()):
         if child.name.startswith("."):
             continue
         if child.is_dir():
-            problems.append(f"tables/ contains a subdirectory (only .html "
-                            f"files allowed): {child.name}")
+            problems.append(f"{prefix}tables/ contains a subdirectory "
+                            f"(only .html files allowed): {child.name}")
         elif child.suffix.lower() != ".html":
-            problems.append(f"tables/ contains a non-html file (only .html "
-                            f"files allowed): {child.name}")
+            problems.append(f"{prefix}tables/ contains a non-html file "
+                            f"(only .html files allowed): {child.name}")
     transcriptions = table_files(root)
     for label, path in transcriptions.items():
-        where = f"tables/{label}.html"
+        where = f"{prefix}tables/{label}.html"
         try:
             source = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
@@ -539,7 +615,8 @@ def _validate_tables(root: Path):
     return problems, list(transcriptions)
 
 
-def _cross_check_tables(declared_labels, transcribed_labels) -> list[str]:
+def _cross_check_tables(declared_labels, transcribed_labels, prefix="",
+                        declared_in="manifest.json") -> list[str]:
     """Bind tables/ to the manifest's declaration, in the one direction
     that is an error.
 
@@ -553,9 +630,9 @@ def _cross_check_tables(declared_labels, transcribed_labels) -> list[str]:
     """
     declared = set(declared_labels)
     return [
-        f"tables/{label}.html is not declared in manifest.json 'exhibits'; "
-        f"a transcription belongs to a declared exhibit, and its label "
-        f"names which one"
+        f"{prefix}tables/{label}.html is not declared in {declared_in} "
+        f"'exhibits'; a transcription belongs to a declared exhibit, and "
+        f"its label names which one"
         for label in sorted(set(transcribed_labels) - declared)
     ]
 
@@ -937,8 +1014,258 @@ class _TableHTMLParser(HTMLParser):
         return problems
 
 
-def _validate_figures(root: Path):
+def supplement_dirs(root) -> dict[str, Path]:
+    """The supplements a bundle carries: name to path, ordered by name.
+
+    The `supplements/` answer to `figure_files`, and answered here for the
+    same reason. A supplement's own assets are read by handing its path
+    back to `figure_files` and `table_files`, which is why a supplement
+    directory is shaped like the bundle around it: the functions that read
+    one read the other unchanged.
+    """
+    supplements_dir = Path(root) / "supplements"
+    if not supplements_dir.is_dir():
+        return {}
+    found = {}
+    for child in sorted(supplements_dir.iterdir()):
+        if child.name.startswith("."):
+            continue  # hidden OS metadata (.DS_Store etc.) is not a supplement
+        if child.is_dir():
+            found[child.name] = child
+    return {name: found[name] for name in sorted(found)}
+
+
+def _validate_supplements(root: Path, manifest_id):
+    """Return (problems, declared) for supplements.json and supplements/.
+
+    declared is {name: labels} when the declaration is structurally sound,
+    and None when it is missing or malformed, so the caller skips the
+    cross-checks against the directories the way it does for figures/.
+    An empty dict is the ordinary case: most papers have no supplement.
+    """
+    declaration = root / "supplements.json"
+    present = supplement_dirs(root)
+    stray = _stray_supplement_files(root)
+    if not declaration.exists():
+        if present:
+            return ([f"supplements/ holds {', '.join(sorted(present))} but "
+                     f"there is no supplements.json; a supplement reaches a "
+                     f"consumer through the declaration or not at all"]
+                    + stray, None)
+        # A supplements/ directory holding no supplement is not a
+        # declaration of anything, but a loose file in it is refused on the
+        # same terms it would be with a declaration beside it.
+        return stray, {}
+    try:
+        raw = declaration.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return [f"supplements.json could not be read as UTF-8: {exc}"], None
+    try:
+        data, duplicates = _parse_manifest(raw)
+    except json.JSONDecodeError as exc:
+        return [f"supplements.json is not valid JSON: {exc}"], None
+    except RecursionError:
+        return ["supplements.json is nested too deeply to parse"], None
+    if not isinstance(data, dict):
+        return [f"supplements.json must be a JSON object, got "
+                f"{type(data).__name__}"], None
+
+    problems = _duplicate_key_problems(data, duplicates, "supplements.json")
+    problems.extend(stray)
+    for key in data:
+        if key not in _SUPPLEMENTS_FIELDS:
+            problems.append(f"supplements.json has unknown key: {key!r}")
+    for name in _SUPPLEMENTS_FIELDS:
+        if name not in data:
+            problems.append(f"supplements.json is missing required key: "
+                            f"{name!r}")
+
+    given_id = data.get("id")
+    if "id" in data:
+        if not isinstance(given_id, str):
+            problems.append(f"supplements.json key 'id' must be a string, "
+                            f"got {type(given_id).__name__}")
+        elif manifest_id is not None and given_id != manifest_id:
+            # A declaration copied between bundles is otherwise undetectable,
+            # and it would attach one paper's supplements to another paper.
+            problems.append(
+                f"supplements.json id {given_id!r} is not the manifest's "
+                f"{manifest_id!r}; the supplements belong to the paper the "
+                f"bundle is of, and carry its identity rather than one of "
+                f"their own")
+
+    # `in`, not `.get`: an explicit null and an absent key both come back
+    # None from a lookup, and only one of them has already been reported.
+    # Read as a lookup, `"supplements": null` was accepted in silence.
+    if "supplements" in data:
+        declared = _validate_supplement_entries(data["supplements"], problems)
+    else:
+        declared = None
+    if declared is None:
+        return problems, None
+
+    for name in sorted(set(declared) - set(present)):
+        problems.append(f"supplements.json declares supplement {name!r} but "
+                        f"there is no supplements/{name}/")
+    for name in sorted(set(present) - set(declared)):
+        problems.append(f"supplements/{name}/ is not declared in "
+                        f"supplements.json; a supplement a consumer can "
+                        f"read is one the bundle vouches for")
+    return problems, declared
+
+
+def _stray_supplement_files(root: Path) -> list[str]:
+    """Anything under supplements/ that is not a supplement."""
+    supplements_dir = root / "supplements"
+    if not supplements_dir.is_dir():
+        return []
+    return [f"supplements/ contains a file (each supplement is a "
+            f"directory): {child.name}"
+            for child in sorted(supplements_dir.iterdir())
+            if not child.name.startswith(".") and not child.is_dir()]
+
+
+def _validate_supplement_entries(value, problems):
+    """Validate the declaration's supplements list; returns {name: labels}.
+
+    None when the block is malformed enough that cross-checking it against
+    the directories would bury the report under derived noise.
+    """
+    if not isinstance(value, list):
+        problems.append(f"supplements.json key 'supplements' must be a list "
+                        f"of {{name, title, exhibits}} objects, got "
+                        f"{type(value).__name__}")
+        return None
+    if not value:
+        # Unlike the manifest's exhibits, an empty list here asserts
+        # nothing: a paper with no supplements has no supplements.json,
+        # which is the same statement without a file to keep in step.
+        problems.append("supplements.json declares no supplements; a paper "
+                        "with none omits the file")
+        return None
+    declared: dict[str, list[str]] = {}
+    malformed = False
+    for index, entry in enumerate(value):
+        where = f"supplements.json supplements[{index}]"
+        if not isinstance(entry, dict):
+            problems.append(f"{where} must be an object with 'name', "
+                            f"'title' and 'exhibits', got "
+                            f"{type(entry).__name__}")
+            malformed = True
+            continue
+        for key in sorted(entry):
+            if key not in _SUPPLEMENT_KEYS:
+                problems.append(f"{where} has unknown key: {key!r} (a "
+                                f"supplement carries 'name', 'title' and "
+                                f"'exhibits')")
+        for key in ("name", "title"):
+            if key not in entry:
+                problems.append(f"{where} is missing required key: {key!r}")
+                malformed = True
+            elif not isinstance(entry[key], str):
+                problems.append(f"{where} key {key!r} must be a string, got "
+                                f"{type(entry[key]).__name__}")
+                malformed = True
+            elif not entry[key].strip():
+                problems.append(f"{where} key {key!r} must be a non-empty "
+                                f"string")
+                malformed = True
+        if "exhibits" not in entry:
+            problems.append(f"{where} is missing required key: 'exhibits'")
+            malformed = True
+            continue
+        entry_problems, labels = _validate_exhibits(entry["exhibits"], where)
+        problems.extend(entry_problems)
+        if entry_problems:
+            malformed = True
+        name = entry.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        if not _LABEL_PATTERN.match(name):
+            problems.append(
+                f"{where} name {name!r} must match ^[A-Za-z0-9._-]+$ "
+                f"(letters, digits, dot, underscore, dash only): it names a "
+                f"supplements/ directory and is the token a consumer asks "
+                f"for a supplement by")
+            malformed = True
+            continue
+        if not _ID_ALNUM.search(name):
+            # The same second half of the rule the id gets, and for the same
+            # reason: the name is used directly as a path component, and "."
+            # and ".." resolve to real directories. Without this, a
+            # supplement named ".." sends every check below to the bundle
+            # root, where it reads the article's own figures and reports
+            # them as a supplement's undeclared files.
+            problems.append(
+                f"{where} name {name!r} must contain at least one letter or "
+                f"digit; names like '.' or '..' are rejected because the "
+                f"name is used directly as a filesystem path component")
+            malformed = True
+            continue
+        if name in declared:
+            problems.append(f"{where} name {name!r} is declared more than "
+                            f"once; supplement names must be unique within "
+                            f"a bundle")
+            malformed = True
+            continue
+        declared[name] = labels
+    return None if malformed else declared
+
+
+def _cross_check_label_uniqueness(article_labels, supplements) -> list[str]:
+    """One label, one exhibit, across the whole bundle.
+
+    A consumer cites an exhibit by its label alone: the filename stem is
+    the citation token, and the map it looks the image up in is flat. So
+    an article `table_01` and a supplement `table_01` are two images with
+    one name, and whichever the consumer loaded second is the one the
+    citation resolves to. Nothing downstream is in a position to notice,
+    which is why it is settled here, where every label in the bundle is
+    visible at once. Prefixing a supplement's labels with its name is the
+    convention that keeps them apart.
+    """
+    seen = {label: "manifest.json" for label in article_labels}
+    problems: list[str] = []
+    for name in sorted(supplements):
+        for label in supplements[name]:
+            if label in seen:
+                problems.append(
+                    f"supplement {name!r} declares exhibit {label!r}, which "
+                    f"{seen[label]} already declares; a label is a "
+                    f"consumer's whole citation, so one label is one "
+                    f"exhibit across the bundle and its supplements")
+                continue
+            seen[label] = f"supplement {name!r}"
+    return problems
+
+
+def _validate_supplement_text(root: Path, prefix: str) -> list[str]:
+    """A supplement's text.md, which unlike the article's is optional.
+
+    A supplement that is nothing but data tables prints no prose, and
+    inventing a text.md for it would mean inventing the prose. When one is
+    there it is held to what the article's is held to: UTF-8 and not
+    empty.
+    """
+    text_path = root / "text.md"
+    if not text_path.exists():
+        return []
+    try:
+        text = text_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return [f"{prefix}text.md could not be read as UTF-8: {exc}"]
+    if not text.strip():
+        return [f"{prefix}text.md is empty; a supplement with no prose "
+                f"omits the file rather than supplying an empty one"]
+    return []
+
+
+def _validate_figures(root: Path, prefix: str = ""):
     """Return (problems, present_labels) for the figures/ directory.
+
+    `prefix` names where the directory sits when it is not the bundle's
+    own, so a supplement's problems read `supplements/{name}/figures/`
+    and point at the file an author has to open.
 
     present_labels is the label of every crop figure_files finds, and None
     when the directory itself is unusable (so the caller skips the
@@ -949,15 +1276,16 @@ def _validate_figures(root: Path):
     if not figures_dir.exists():
         return [], []
     if not figures_dir.is_dir():
-        return [f"figures exists but is not a directory: {figures_dir}"], None
+        return [f"{prefix}figures exists but is not a directory: "
+                f"{figures_dir}"], None
     problems: list[str] = []
     for child in sorted(figures_dir.iterdir()):
         if child.name.startswith("."):
             continue
         if child.is_dir():
-            problems.append(f"figures/ contains a subdirectory (only .png "
-                            f"files allowed): {child.name}")
+            problems.append(f"{prefix}figures/ contains a subdirectory "
+                            f"(only .png files allowed): {child.name}")
         elif child.suffix.lower() != ".png":
-            problems.append(f"figures/ contains a non-png file (only .png "
-                            f"files allowed): {child.name}")
+            problems.append(f"{prefix}figures/ contains a non-png file "
+                            f"(only .png files allowed): {child.name}")
     return problems, list(figure_files(root))

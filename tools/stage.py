@@ -51,6 +51,8 @@ from pathlib import Path
 
 import pymupdf
 
+from alteksto.bundle import is_filename_safe
+
 # Front matter: where a paper states its own identity, before the
 # reference list starts describing everybody else's.
 IDENTITY_PAGES = 3
@@ -121,7 +123,7 @@ def doi_printed(doi: str, flat_text: str) -> bool:
     return False
 
 
-def check_id(paper_id: str) -> str:
+def check_id(paper_id: str, what: str = "id") -> str:
     """The id, or a ValueError saying why it cannot name a directory.
 
     An id becomes a path (`work/{id}`, `bundles/{id}`) in every stage
@@ -130,18 +132,50 @@ def check_id(paper_id: str) -> str:
     the work root rather than naming a directory inside it: `..` climbs
     out of it, a leading slash discards it entirely, and a DOI-shaped id
     quietly nests one work directory inside another.
+
+    `what` names the thing being checked, so a message about a supplement
+    name does not send its author looking at their ids.
+
+    This is deliberately looser than the bundle format's own rule for an
+    id: an id arrives from a registry this repository did not write, and
+    what it may look like is that registry's business up to the point
+    where it has to name a directory. A supplement name is not like that
+    (see `check_supplement_name`).
     """
+    article = "an" if what[0] in "aeiou" else "a"
     value = (paper_id or "").strip()
     if not value:
-        raise ValueError("an id cannot be empty")
+        raise ValueError(f"{article} {what} cannot be empty")
     if value in (".", ".."):
-        raise ValueError(f"{value!r} is not an id")
+        raise ValueError(f"{value!r} is not {article} {what}")
     if "/" in value or "\\" in value or os.sep in value:
         raise ValueError(
-            f"id {value!r} holds a path separator; ids name one directory, "
-            f"so a DOI or a path cannot be one")
+            f"{what} {value!r} holds a path separator; it names one "
+            f"directory, so a DOI or a path cannot be one")
     if value.startswith("."):
-        raise ValueError(f"id {value!r} starts with a dot")
+        raise ValueError(f"{what} {value!r} starts with a dot")
+    return value
+
+
+def check_supplement_name(name: str) -> str:
+    """The supplement's name, held to the bundle format's own rule.
+
+    Stricter than `check_id`, and not by preference. A supplement name is
+    chosen by the caller rather than inherited from a registry, it names
+    a directory in the finished bundle as well as in the work tree, and
+    the playbook prefixes every one of the supplement's exhibit labels
+    with it. So a name the format refuses yields a whole set of labels it
+    also refuses, and the run finds that out at gate 1, after the
+    conversion. The rule is imported rather than restated, so the two
+    cannot drift.
+    """
+    value = check_id(name, what="supplement name")
+    if not is_filename_safe(value):
+        raise ValueError(
+            f"supplement name {value!r} must match ^[A-Za-z0-9._-]+$ with "
+            f"at least one letter or digit; it names a directory in the "
+            f"bundle too, and every one of the supplement's exhibit labels "
+            f"is prefixed with it")
     return value
 
 
@@ -347,24 +381,40 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def stage_one(work_root: Path, paper_id: str, pdf_path: Path) -> str:
+def stage_one(work_root: Path, paper_id: str, pdf_path: Path,
+              supplement: str | None = None) -> str:
     """Copy the PDF to {work_root}/{id}/source.pdf. Returns what it did.
 
     An id already staged from this very PDF is left alone, so a rerun
     resumes rather than repeats. An id already staged from a different
     PDF is a stop: overwriting it would convert one paper's pages under
     another paper's name, and the id is what every later stage trusts.
+
+    With `supplement`, the destination is
+    {work_root}/{id}/supplements/{name}/source.pdf instead. A supplement
+    is converted as its own paper-like unit under the paper it belongs
+    to, so it is staged the same way and held to the same rule about
+    overwriting: the name is what its exhibits are labelled from, and a
+    supplement converted under the wrong name mislabels every one of
+    them.
     """
     paper_id = check_id(paper_id)
     if not pdf_path.is_file():
         raise ValueError(f"no such PDF: {pdf_path}")
-    destination = work_root / paper_id / "source.pdf"
+    if supplement is not None:
+        supplement = check_supplement_name(supplement)
+        destination = (work_root / paper_id / "supplements" / supplement
+                       / "source.pdf")
+    else:
+        destination = work_root / paper_id / "source.pdf"
     if destination.is_file():
         if sha256(destination) == sha256(pdf_path):
             return "already staged"
+        named = (f"id {paper_id}" if supplement is None
+                 else f"supplement {supplement} of id {paper_id}")
         raise ValueError(
             f"{destination} already holds a different PDF; remove the work "
-            f"directory to restage id {paper_id}")
+            f"directory to restage {named}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(pdf_path, destination)
     return "staged"
@@ -375,16 +425,19 @@ def report(paper_id: str, pdf_path: Path, action: str) -> None:
     print(f"{paper_id}\t{pdf_path}\t{action}")
 
 
-def run_explicit(work_root: Path, pairs: list[tuple[str, Path]]) -> int:
+def run_explicit(work_root: Path, pairs: list[tuple[str, Path]],
+                 supplement: str | None = None) -> int:
     failures = 0
     for paper_id, pdf_path in pairs:
         try:
-            action = stage_one(work_root, paper_id, pdf_path)
+            action = stage_one(work_root, paper_id, pdf_path, supplement)
         except ValueError as exc:
             print(f"stage: {exc}", file=sys.stderr)
             failures += 1
             continue
-        report(paper_id, pdf_path, action)
+        named = (paper_id if supplement is None
+                 else f"{paper_id}/{supplement}")
+        report(named, pdf_path, action)
     if failures:
         print(f"stage: {failures} of {len(pairs)} could not be staged",
               file=sys.stderr)
@@ -502,6 +555,10 @@ def main(argv=None) -> int:
                              "(default work)")
     parser.add_argument("--id", help="the paper's id, supplied by the caller")
     parser.add_argument("--pdf", type=Path, help="the PDF to stage under --id")
+    parser.add_argument("--supplement", metavar="NAME",
+                        help="stage the PDF as this named supplement of "
+                             "--id, at {work}/{id}/supplements/NAME/"
+                             "source.pdf, rather than as the article")
     parser.add_argument("--map-file", type=Path,
                         help="JSON object of id to PDF path, for many papers")
     parser.add_argument("--from", dest="source_dir", type=Path,
@@ -521,6 +578,16 @@ def main(argv=None) -> int:
     if sum(modes) != 1:
         parser.error("choose exactly one of --id/--pdf, --map-file, or "
                      "--from/--registry")
+    # A supplement is staged one at a time, under a name only the caller
+    # knows. Accepting the flag alongside a mode that ignores it would put
+    # the supplement's PDF at the article's own source.pdf and say
+    # "staged", and the run that followed would convert the supplement as
+    # the paper: wrong text, wrong manifest, an id bound to the wrong
+    # document, and nothing anywhere reporting it.
+    if args.supplement is not None and (args.map_file or args.source_dir
+                                        or args.registry):
+        parser.error("--supplement is used with --id/--pdf; a supplement is "
+                     "staged one at a time, under the name you give it")
 
     if args.map_file:
         try:
@@ -538,7 +605,8 @@ def main(argv=None) -> int:
 
     if args.id is None or args.pdf is None:
         parser.error("--id and --pdf are used together")
-    return run_explicit(args.work, [(args.id, args.pdf)])
+    return run_explicit(args.work, [(args.id, args.pdf)],
+                        supplement=args.supplement)
 
 
 if __name__ == "__main__":

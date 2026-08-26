@@ -359,3 +359,83 @@ def test_mode_flags_are_exclusive(stage_tool, tmp_path):
 def test_normalise_doi_strips_the_resolver(stage_tool):
     assert stage_tool.normalise_doi("https://dx.doi.org/10.1/A") == "10.1/a"
     assert stage_tool.normalise_doi("doi: 10.1/a") == "10.1/a"
+
+
+def test_a_supplement_is_staged_under_its_paper(stage_tool, tmp_path):
+    """A supplement is a paper-like unit under the paper it belongs to,
+    so it is staged the same way and lands beside it rather than in it."""
+    pdf = make_pdf(tmp_path / "supp.pdf", "An invented supplement")
+    work = tmp_path / "work"
+    assert stage_tool.main(["--id", "R0126", "--pdf", str(pdf),
+                            "--supplement", "supplement_3",
+                            "--work", str(work)]) == 0
+    staged = work / "R0126" / "supplements" / "supplement_3" / "source.pdf"
+    assert staged.is_file()
+    # And the article's own slot is untouched by it.
+    assert not (work / "R0126" / "source.pdf").exists()
+
+
+def test_a_supplement_name_cannot_escape_the_work_directory(stage_tool,
+                                                            tmp_path,
+                                                            capsys):
+    pdf = make_pdf(tmp_path / "supp.pdf", "An invented supplement")
+    assert stage_tool.main(["--id", "R0126", "--pdf", str(pdf),
+                            "--supplement", "../escape",
+                            "--work", str(tmp_path / "work")]) == 1
+    err = capsys.readouterr().err
+    assert "supplement name" in err and "path separator" in err
+
+
+def test_restaging_a_supplement_from_a_different_pdf_is_a_stop(stage_tool,
+                                                               tmp_path,
+                                                               capsys):
+    """The name is what its exhibits are labelled from, so a supplement
+    converted under the wrong name mislabels every one of them."""
+    work = tmp_path / "work"
+    first = make_pdf(tmp_path / "one.pdf", "The first supplement")
+    second = make_pdf(tmp_path / "two.pdf", "A different supplement")
+    argv = ["--id", "R0126", "--supplement", "supplement_3",
+            "--work", str(work), "--pdf"]
+    assert stage_tool.main(argv + [str(first)]) == 0
+    assert stage_tool.main(argv + [str(first)]) == 0  # a rerun resumes
+    assert stage_tool.main(argv + [str(second)]) == 1
+    assert "supplement supplement_3 of id R0126" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("extra", [
+    ["--map-file", "MAP"],
+    ["--from", "DIR", "--registry", "REG"],
+])
+def test_supplement_is_refused_where_it_would_be_ignored(stage_tool, tmp_path,
+                                                         extra):
+    """It used to stage the supplement as the article and say "staged".
+
+    main() passed the name only in the explicit mode, so the other two
+    put the supplement's PDF at the paper's own source.pdf. The run that
+    followed converted the supplement as the paper: wrong text, wrong
+    manifest, an id bound to the wrong document, and nothing reporting
+    it anywhere.
+    """
+    argv = ["--work", str(tmp_path / "work"), "--supplement", "supp_a"]
+    for token in extra:
+        argv.append(str(tmp_path / token) if token.isupper() else token)
+    with pytest.raises(SystemExit):
+        stage_tool.main(argv)
+
+
+@pytest.mark.parametrize("name", ["supplement a", "supp#1", "Unite\u0301",
+                                  "..", ""])
+def test_a_supplement_name_the_format_refuses_is_refused_here(stage_tool,
+                                                              tmp_path,
+                                                              capsys, name):
+    """Before the conversion rather than after it.
+
+    The playbook prefixes every one of a supplement's exhibit labels with
+    its name, so a name the format refuses yields a whole set of labels
+    it also refuses, and gate 1 is what would otherwise say so.
+    """
+    pdf = make_pdf(tmp_path / "supp.pdf", "An invented supplement")
+    assert stage_tool.main(["--id", "inv-01", "--pdf", str(pdf),
+                            "--supplement", name,
+                            "--work", str(tmp_path / "work")]) == 1
+    assert "supplement name" in capsys.readouterr().err

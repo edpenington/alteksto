@@ -13,7 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from alteksto.bundle import figure_files, validate_bundle
+from alteksto.bundle import (_walk_objects, figure_files,
+                             validate_bundle)
 from conftest import load_tool
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -300,18 +301,56 @@ def test_a_repeated_key_is_not_confused_with_a_repeated_value(tmp_path):
     assert validate_bundle(bundle) == []
 
 
-def test_a_manifest_nested_too_deeply_to_walk_is_still_reported(tmp_path):
-    # The duplicate is found at the top of a structure far deeper than the
-    # interpreter's recursion limit. Locating it must report, not raise:
-    # validate_bundle never raises for a malformed bundle.
-    deep = "[" * 5000 + "]" * 5000
-    bundle = make_bundle(tmp_path / "b")
+def _deeply_nested_manifest(root, depth):
+    bundle = make_bundle(root)
     (bundle / "manifest.json").write_text(
         '{"schema_version": 2, "id": "inv-01", "title": "An invented paper", '
-        '"id": "inv-02", "exhibits": [], "warden": ' + deep + '}',
+        '"id": "inv-02", "exhibits": [], "warden": '
+        + "[" * depth + "]" * depth + '}',
         encoding="utf-8")
+    return bundle
+
+
+def test_the_walk_carries_its_own_queue_rather_than_the_stack():
+    """Depth costs the walk nothing, which is why it has a queue.
+
+    Asked of `_walk_objects` directly and on a structure built in Python
+    rather than parsed, because through `validate_bundle` the question
+    cannot be asked at all: json's scanner is itself bounded by the
+    recursion limit on some supported interpreters, so a manifest deeper
+    than that limit never reaches the walk, and raising the limit to get
+    it there would raise it for a recursive walk too and prove nothing.
+    """
+    deep = []
+    cursor = deep
+    for _ in range(5000):
+        nested = []
+        cursor.append(nested)
+        cursor = nested
+    assert sys.getrecursionlimit() < 5000
+    found = list(_walk_objects({"warden": deep}, "manifest.json"))
+    assert found and found[0][0] == "manifest.json"
+
+
+def test_a_duplicate_is_located_inside_a_nested_manifest(tmp_path):
+    bundle = _deeply_nested_manifest(tmp_path / "b", 50)
     problems = validate_bundle(bundle)
     assert any("duplicate key: 'id'" in p for p in problems)
+
+
+def test_a_manifest_too_deep_for_the_parser_reports_rather_than_raises(
+        tmp_path):
+    # Deeper than json's own scanner tolerates on some supported
+    # interpreters, and how deep that is belongs to the interpreter rather
+    # than to this format. So the assertion is the one that holds on all of
+    # them: problems come back, and nothing is raised. Which problems
+    # depends on whether the parse finished, and the duplicate can only be
+    # named when it did.
+    bundle = _deeply_nested_manifest(tmp_path / "b", 5000)
+    problems = validate_bundle(bundle)
+    assert problems
+    assert any("duplicate key: 'id'" in p or "nested too deeply" in p
+               for p in problems), problems
 
 
 def test_exhibit_entries_take_label_caption_and_optional_notes(tmp_path):

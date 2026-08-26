@@ -114,6 +114,16 @@ def _validate_manifest(root: Path):
         data, duplicates = _parse_manifest(raw)
     except json.JSONDecodeError as exc:
         return [f"manifest.json is not valid JSON: {exc}"], None
+    except RecursionError:
+        # The walk below carries its own queue so that depth cannot throw
+        # out of it, but the parse runs first and json's scanner recurses in
+        # C, at a depth that is a property of the interpreter rather than of
+        # this format: 3.11 gives up where later versions keep going. Either
+        # way validate_bundle answers with a problem, because it never
+        # raises for a malformed bundle, and a manifest this deep is
+        # malformed whatever the parser makes of it.
+        return ["manifest.json is nested too deeply to parse; a manifest is "
+                "a flat object with one list of exhibits in it"], None
     if not isinstance(data, dict):
         return [f"manifest.json must be a JSON object, got "
                 f"{type(data).__name__}"], None

@@ -257,7 +257,7 @@ def test_a_duplicated_manifest_key_is_rejected(tmp_path):
     """
     bundle = make_bundle(tmp_path / "b")
     (bundle / "manifest.json").write_text(
-        '{"schema_version": 2, "id": "inv-01", "title": "An invented paper", '
+        '{"schema_version": ' + str(SCHEMA_VERSION) + ', "id": "inv-01", "title": "An invented paper", '
         '"id": "inv-02", "exhibits": []}', encoding="utf-8")
     problems = validate_bundle(bundle)
     assert len(problems) == 1
@@ -269,7 +269,7 @@ def test_a_duplicated_key_inside_an_exhibit_is_located(tmp_path):
     # the problem says which entry, as every other exhibit problem does.
     bundle = make_bundle(tmp_path / "b", figures=("table_01",))
     (bundle / "manifest.json").write_text(
-        '{"schema_version": 2, "id": "inv-01", "title": "An invented paper", '
+        '{"schema_version": ' + str(SCHEMA_VERSION) + ', "id": "inv-01", "title": "An invented paper", '
         '"exhibits": [{"label": "table_01", "caption": "Herons at dawn", '
         '"caption": "Herons at dusk"}]}', encoding="utf-8")
     problems = validate_bundle(bundle)
@@ -292,7 +292,7 @@ def test_every_duplicate_is_named_and_the_rest_is_still_checked(tmp_path):
     """
     bundle = make_bundle(tmp_path / "b", figures=("table_01",))
     (bundle / "manifest.json").write_text(
-        '{"schema_version": 2, "id": "inv-01", "id": "inv-02", '
+        '{"schema_version": ' + str(SCHEMA_VERSION) + ', "id": "inv-01", "id": "inv-02", '
         '"id": "inv-03", "warden": "not a manifest key", '
         '"exhibits": [{"label": "table_01", "caption": "Herons at dawn", '
         '"caption": "Herons at dusk"}]}', encoding="utf-8")
@@ -324,7 +324,7 @@ def test_a_repeated_key_is_not_confused_with_a_repeated_value(tmp_path):
 def _deeply_nested_manifest(root, depth):
     bundle = make_bundle(root)
     (bundle / "manifest.json").write_text(
-        '{"schema_version": 2, "id": "inv-01", "title": "An invented paper", '
+        '{"schema_version": ' + str(SCHEMA_VERSION) + ', "id": "inv-01", "title": "An invented paper", '
         '"id": "inv-02", "exhibits": [], "warden": '
         + "[" * depth + "]" * depth + '}',
         encoding="utf-8")
@@ -622,7 +622,7 @@ def test_a_correct_transcription_passes_clean(tmp_path, shape):
     ("<table><tr><td/></tr></table>", "writes <td/> in the self-closing"),
     ("<table></table>", "has no cells"),
     ("<table><tr><td>a</td></tr><tr></tr></table>",
-     "has no cells in row 1"),
+     "writes no cells in row 1"),
     ("not a table at all", "contains no <table>"),
     ("<sup>a</sup>", "uses <sup> outside any cell"),
 ])
@@ -783,6 +783,47 @@ def test_an_overhanging_rowspan_does_not_invent_rows_to_complain_about(
     assert not any("row 3" in p for p in problems), problems
 
 
+def test_an_empty_row_may_not_be_covered_by_a_widened_span(tmp_path):
+    """The other half of the bypass, and the one the message used to teach.
+
+    Deleting the row and widening the span above it is refused by the
+    overhang rule. Keeping the row empty and widening the span is the
+    same data loss for one edit less, and the two files draw identically,
+    so nothing downstream can tell them apart. The earlier wording told
+    an author to do exactly this.
+    """
+    printed = ("<table><tr><th>Season</th><th>n</th></tr>"
+               "<tr><td>April</td><td>142</td></tr>"
+               "<tr><td>July</td><td>88</td></tr></table>")
+    assert validate_table_html(printed, "t.html") == []
+    hidden = ('<table><tr><th>Season</th><th>n</th></tr>'
+              '<tr><td rowspan="2">April</td><td rowspan="2">142</td></tr>'
+              '<tr></tr></table>')
+    problems = validate_table_html(hidden, "t.html")
+    assert any("writes no cells in row 2" in p for p in problems), problems
+
+
+def test_the_occupancy_is_bounded_as_it_is_built(tmp_path):
+    """The limit has to bite during the parse, not after it.
+
+    Positions are written as the cells are read, so one cell carrying both
+    spans at their ceiling claims a million of them. Checking the
+    rectangle afterwards left a four hundred byte file costing gate 1
+    gigabytes before anything got to say the grid was too large.
+    """
+    markup = ("<table><tr>"
+              + '<td colspan="1000" rowspan="1000">x</td>' * 10
+              + "</tr></table>")
+    started = time.perf_counter()
+    problems = validate_table_html(markup, "t.html")
+    assert time.perf_counter() - started < 1.0
+    assert any("claims more than 100000 cell positions" in p
+               for p in problems), problems
+    # And nothing else, because a grid that overflowed stopped placing
+    # cells and is not also an empty table.
+    assert len(problems) == 1, problems
+
+
 def test_a_grid_beyond_the_limit_is_refused_cheaply(tmp_path):
     """A sub-kilobyte file may not buy tens of millions of positions.
 
@@ -794,7 +835,7 @@ def test_a_grid_beyond_the_limit_is_refused_cheaply(tmp_path):
     started = time.perf_counter()
     problems = validate_table_html(markup, "t.html")
     assert time.perf_counter() - started < 2.0
-    assert any("beyond the 100000 positions" in p for p in problems), problems
+    assert any("100000 cell positions" in p for p in problems), problems
 
 
 def test_a_real_table_of_five_hundred_rows_is_not_near_the_limit(tmp_path):

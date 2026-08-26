@@ -159,18 +159,23 @@ it:
   makes a transcription worth having: both faults read plausibly and
   both put a value in a column it does not belong in, and neither is
   visible to a reader of the markup.
-- **A span may not reach past the last row.** A reader clips a rowspan
-  to the rows that exist, and so does this: a rowspan claiming rows the
-  table never writes is an error, not a taller table. The rule earns
-  its place by closing the obvious way round the one above, which is to
-  silence a hole by widening the rowspan over it. That tiles perfectly
-  and the missing row stays missing, and because the two files draw
-  identically it is invisible to the render as well.
-- **Limits.** One span is at most 1000, and the grid it describes at
-  most 100,000 positions. No printed exhibit approaches either, and
-  without them a file well under a kilobyte can describe tens of
-  millions of positions, which is work a bundle should not be able to
-  ask of the validator that gates every conversion.
+- **Every row carries at least one cell**, and **a span may not reach
+  past the last row.** Together these close the way round the rule
+  above, which is to silence a hole by widening the rowspan over it.
+  That tiles perfectly, the missing row stays missing, and the two
+  files draw identically, so the render cannot tell them apart either.
+  One rule alone is not enough: with only the second, the row is kept
+  and emptied instead of deleted, which is the same loss for one edit
+  less. A row whose positions are all claimed from above prints
+  nothing, so no exhibit has one.
+- **Limits.** One span is at most 1000, and a table at most 100,000
+  cell positions. No printed exhibit approaches either. The second is
+  counted as the cells are read rather than from the finished
+  rectangle, because the positions are recorded as they are claimed: a
+  single cell carrying both spans at their ceiling claims a million of
+  them, so a file of a few hundred bytes could otherwise cost the
+  validator that gates every conversion gigabytes before anything was
+  in a position to call the grid too large.
 - **Cell text is the characters the exhibit prints**, on the same terms
   text.md holds the paper's: transcribed as printed, typos included. A
   cell the exhibit leaves empty is an empty cell here, never a dash

@@ -624,6 +624,7 @@ class _TableHTMLParser(HTMLParser):
         self.cells_in_row = 0
         self.empty_rows: list[int] = []
         self.occupied: dict[tuple[int, int], bool] = {}
+        self.grid_overflowed = False
 
     # -- reporting -----------------------------------------------------
 
@@ -660,10 +661,7 @@ class _TableHTMLParser(HTMLParser):
                     pass
             return
         if tag == "tr" and self.cells_in_row == 0:
-            covered = any(position[0] == self.row_index
-                          for position in self.occupied)
-            if not covered:
-                self.empty_rows.append(self.row_index)
+            self.empty_rows.append(self.row_index)
         self.stack.pop()
 
     def handle_data(self, data):
@@ -698,6 +696,11 @@ class _TableHTMLParser(HTMLParser):
         invisible: `html.parser` ends a marked section at `]]>` and the
         HTML5 bogus-comment rule ends it at the first `>`, so the same
         bytes can give this parser and a consumer's different cells.
+
+        Only `<![CDATA[` reaches here. Every other marked section form is
+        routed to the bogus-comment path and refused there instead, so
+        the prohibition is complete even though this handler sees one
+        shape of it.
         """
         self._problem("carries a marked section (<![...]>); the file is "
                       "one <table> element, and parsers disagree about "
@@ -809,6 +812,19 @@ class _TableHTMLParser(HTMLParser):
         rowspan = self._span(tag, values, "rowspan")
         if self.row_index < 0:
             return  # a cell outside any row; _check_position said so
+        if self.grid_overflowed:
+            return
+        # Bounded here rather than after the parse, because the positions
+        # are written as they are read: one cell carrying both spans at
+        # their ceiling claims a million of them, so a file of a few
+        # hundred bytes could otherwise cost gigabytes before anything got
+        # the chance to say the grid was too large.
+        if len(self.occupied) + rowspan * colspan > _GRID_LIMIT:
+            self.grid_overflowed = True
+            self._problem(f"claims more than {_GRID_LIMIT} cell positions; "
+                          f"no printed exhibit is this size, so the spans "
+                          f"are wrong rather than the table being large")
+            return
         column = self.column
         while (self.row_index, column) in self.occupied:
             column += 1
@@ -839,14 +855,22 @@ class _TableHTMLParser(HTMLParser):
             problems.append(f"{self.where} contains no <table>; a "
                             f"transcription is one table element")
             return problems
+        # Before the cell count, because a grid that overflowed stopped
+        # placing cells and would otherwise also be reported as empty,
+        # which is true of the parse and not of the file.
+        if self.grid_overflowed:
+            return problems
         if not self.cells:
             problems.append(f"{self.where} has no cells; an exhibit with "
                             f"nothing to transcribe omits the file")
             return problems
         for row in self.empty_rows:
-            problems.append(f"{self.where} has no cells in row {row}; a "
-                            f"row either carries cells or is covered by a "
-                            f"span from the rows above it")
+            problems.append(f"{self.where} writes no cells in row {row}; "
+                            f"every row carries at least one. A row whose "
+                            f"positions are all claimed by spans from "
+                            f"above prints nothing, so no exhibit has one, "
+                            f"and keeping one to be covered is how a row "
+                            f"that went missing gets hidden")
         problems.extend(self._overhang_problems())
         problems.extend(self._grid_problems())
         return problems
@@ -867,8 +891,8 @@ class _TableHTMLParser(HTMLParser):
             return []
         return [f"{self.where} has a rowspan reaching row {beyond[0]} when "
                 f"the table writes {rows} rows; a span cannot claim rows "
-                f"that are not there, and widening one to cover a row that "
-                f"went missing hides it rather than fixing it"]
+                f"that are not there, so either the span is longer than "
+                f"the exhibit prints or a row is missing"]
 
     def _grid_problems(self) -> list[str]:
         """The positions the occupancy map is left without a cell.

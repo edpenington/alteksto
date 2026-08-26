@@ -31,6 +31,16 @@ def render_table_tool():
     return load_tool("render_table")
 
 
+def _page_width_px(tool, width, dpi):
+    """The pixel width of the page a table of `width` is first laid out on.
+
+    A render truncated to that page is this wide, so it is the threshold a
+    grown render has to beat. Read off the tool's own padding rather than
+    written down here, so the two cannot drift apart.
+    """
+    return (width + 2 * tool.PAD) * dpi / 72
+
+
 def write(tmp_path, markup, name="table_01.html"):
     path = tmp_path / name
     path.write_text(markup, encoding="utf-8")
@@ -139,9 +149,11 @@ def test_a_wide_table_grows_the_frame_rather_than_being_cut(
     assert render_table_tool.main([str(source), "--out", str(out),
                                    "--width", "760", "--dpi", "150"]) == 0
     pix = pymupdf.Pixmap(str(out))
-    # Wider than the frame it was first laid out in, which it can only be
-    # if the frame grew instead of the table being clipped to it.
-    assert pix.width > 760 * 150 / 72
+    # Wider than the whole PAGE it was first laid out on, not merely wider
+    # than the frame inside it. A fully truncated render fills that page,
+    # so the looser threshold passed against the very code this test was
+    # written to catch, by nine pixels.
+    assert pix.width > _page_width_px(render_table_tool, 760, 150)
 
 
 def test_an_unbreakable_cell_widens_the_frame(render_table_tool, tmp_path):
@@ -150,7 +162,8 @@ def test_an_unbreakable_cell_widens_the_frame(render_table_tool, tmp_path):
                              "<td>142</td></tr></table>")
     out = tmp_path / "unbreakable.png"
     assert render_table_tool.main([str(source), "--out", str(out)]) == 0
-    assert pymupdf.Pixmap(str(out)).width > 760 * 150 / 72
+    assert (pymupdf.Pixmap(str(out)).width
+            > _page_width_px(render_table_tool, 760, 150))
 
 
 def test_a_table_taller_than_the_first_frame_still_renders(
@@ -168,6 +181,41 @@ def test_a_table_taller_than_the_first_frame_still_renders(
     out = tmp_path / "verylong.png"
     assert render_table_tool.main([str(source), "--out", str(out)]) == 0
     assert pymupdf.Pixmap(str(out)).height > 20000
+
+
+def test_a_picture_too_large_to_use_is_refused_by_this_tool(
+        render_table_tool, tmp_path, capsys):
+    """Growing in both directions has a ceiling, and it is ours.
+
+    A table the format accepts can ask for hundreds of megapixels, and
+    past a point MuPDF refuses to draw one and raises an error of a type
+    a caller would not think to name. A nine-frame traceback where a
+    `render-table:` line belongs is the tool failing at the one thing it
+    promises when it refuses something.
+    """
+    # Reached with resolution rather than with an enormous table: the
+    # ceiling is on the picture, so a modest table at a high --dpi crosses
+    # it for the same reason and lays out in a fraction of the time.
+    row = "<tr>" + "<td>12.4 (3.1)</td>" * 20 + "</tr>"
+    source = write(tmp_path, "<table>" + row * 60 + "</table>")
+    out = tmp_path / "huge.png"
+    assert render_table_tool.main([str(source), "--out", str(out),
+                                   "--dpi", "900"]) == 1
+    assert not out.exists()
+    err = capsys.readouterr().err
+    assert "megapixels" in err and "lower --dpi" in err
+    # And the advice works: the same table at a lower resolution renders.
+    assert render_table_tool.main([str(source), "--out", str(out),
+                                   "--dpi", "150"]) == 0
+
+
+def test_a_width_beyond_the_ceiling_is_refused(render_table_tool, tmp_path,
+                                               capsys):
+    source = write(tmp_path, SPANNING)
+    assert render_table_tool.main([str(source), "--out",
+                                   str(tmp_path / "x.png"),
+                                   "--width", "99999"]) == 1
+    assert "beyond the 20000" in capsys.readouterr().err
 
 
 def test_a_long_table_grows_the_page_rather_than_splitting(

@@ -65,6 +65,13 @@ PAD = 8
 START_HEIGHT = 1400.0
 MAX_HEIGHT = 40000.0
 MAX_WIDTH = 20000.0
+# And a ceiling on the picture itself. Growing the frame in both directions
+# means a table the format accepts can ask for a pixmap of hundreds of
+# megabytes, and past a point MuPDF refuses to make one at all, with an
+# error of its own rather than a line from this tool. Forty megapixels is
+# far more than a reader can use and leaves the refusal here, where it can
+# say what to do about it.
+MAX_PIXELS = 40_000_000
 
 
 def content_box(page):
@@ -136,6 +143,14 @@ def render(source: str, width: float, dpi: int, rotate: int = 0):
             width = min(width * 2, MAX_WIDTH)
             continue
         clip = (drawn + (-PAD, -PAD, PAD, PAD)) & document[0].rect
+        pixels = (clip.width * dpi / 72.0) * (clip.height * dpi / 72.0)
+        if pixels > MAX_PIXELS:
+            raise ValueError(
+                f"the table draws to {pixels / 1e6:.0f} megapixels at "
+                f"{dpi} DPI, beyond the {MAX_PIXELS / 1e6:.0f} this tool "
+                f"will make; render it again with a lower --dpi, which "
+                f"costs the comparison nothing this table's size has not "
+                f"already cost it")
         # Rotation is applied by the render matrix rather than to a saved
         # image, so a turned render is drawn at full resolution rather than
         # resampled from an upright one.
@@ -177,6 +192,10 @@ def main(argv=None) -> int:
         print(f"render-table: --width and --dpi must be positive, got "
               f"{args.width} and {args.dpi}", file=sys.stderr)
         return 1
+    if args.width > MAX_WIDTH:
+        print(f"render-table: --width {args.width:.0f} is beyond the "
+              f"{MAX_WIDTH:.0f} this tool lays out in", file=sys.stderr)
+        return 1
     try:
         source = args.source.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
@@ -195,7 +214,12 @@ def main(argv=None) -> int:
     except ValueError as exc:
         print(f"render-table: {exc}", file=sys.stderr)
         return 1
-    except (RuntimeError, TypeError) as exc:
+    except Exception as exc:  # noqa: BLE001 - see below
+        # Deliberately everything. MuPDF raises its own exception types for
+        # a page it will not draw, they do not descend from the ones a
+        # caller would think to name, and a nine-frame traceback where a
+        # `render-table:` line belongs is this tool failing to do the one
+        # thing it promises when it refuses something.
         print(f"render-table: {args.source} did not lay out: {exc}",
               file=sys.stderr)
         return 1

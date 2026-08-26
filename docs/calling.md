@@ -67,8 +67,9 @@ and not one you make or oversee.
 
 ## What you get
 
-`bundles/{id}/`, holding `manifest.json`, `text.md`, and
-`figures/*.png`, specified in `docs/bundle.md`. Everything
+`bundles/{id}/`, holding `manifest.json`, `text.md`, `figures/*.png`,
+and `tables/*.html` for the table exhibits whose content could be
+transcribed and checked, specified in `docs/bundle.md`. Everything
 intermediate stays in `work/{id}/` and never enters the bundle.
 
 The run is done when the bundle passes validation and every finding of

@@ -18,7 +18,10 @@ it); an unknown manifest key (only the contract's keys exist); a
 missing required key (id, title, exhibits, schema_version); a
 duplicate manifest key (the validator says which key and where; the
 manifest is hand-authored, so keep the value the paper supports and
-delete the other, rather than assuming the surviving one is right).
+delete the other, rather than assuming the surviving one is right); a
+transcription in `tables/` whose label no exhibit declares, or whose
+cells do not tile their grid (the validator names the position, and a
+hole is a dropped cell or a span one too small).
 
 Validation says nothing about text fidelity or crop quality. Passing
 gate 1 means the bundle is well-formed, nothing more.
@@ -53,6 +56,8 @@ named it, the paper's id, and:
 
 - the bundle's text.md,
 - the page renders,
+- the table transcriptions and the render of each
+  (`work/{id}/table_renders/`), where the bundle has them,
 - the text-layer dump blocks.json with its emphasis runs,
 - the skeleton,
 - triage.json (so it knows which witness was the character source),
@@ -70,6 +75,14 @@ reads batched into parallel tool calls. It reports discrepancies to
 - **Omission**: skeleton units, exhibits, footnotes, or reference
   entries not honoured in the final text; paragraphs visibly on the
   page and absent from the draft.
+- **Transcriptions**: for every `tables/{label}.html`, its render
+  beside its crop. Same cells in the same positions, same header
+  structure and spans, same characters, the same cells empty. The
+  render is deliberately plain and will not look like the journal's
+  typesetting, so report content and arrangement only and never
+  styling. A transcription that cannot be confirmed is reported for
+  deletion, not for correction: the crop is the content, and a bundle
+  with no transcription is in the state every bundle was in before.
 - **Invention**: text in the draft that no render shows; headings the
   paper does not print; "helpful" additions.
 - **Distortion**: numbers, names, and high-entropy strings that differ

@@ -70,6 +70,69 @@ For each exhibit:
 An exhibit spanning multiple pages becomes one crop per page part only
 if the parts cannot be joined sensibly; prefer the meaningful whole.
 
+## Transcribing a table
+
+Every table exhibit also gets its content as text, in
+`bundles/{id}/tables/{label}.html`. Figures do not: a figure's content
+is its pixels, and describing them here is invention, the same rule
+that keeps figure-internal text out of text.md.
+
+The two witnesses divide cleanly, and mixing them up is how a
+transcription goes wrong:
+
+- **Characters come from the exhibit's text-layer dump**
+  (`work/{id}/exhibit_dumps/{label}.txt`), the same source and the same
+  standard as the walk's. Transcribe what the exhibit prints, typos
+  included.
+- **Structure comes from the crop**, viewed. The layer flattens tables
+  one cell per line, interleaves multi-line headers, and drops empty
+  cells without a trace, so it can say what the characters are and
+  never which cell they sit in. Read the arrangement off the image.
+
+Write it as the format specifies (`docs/bundle.md`): one `<table>`,
+whitelisted elements only, `colspan` and `rowspan` where the exhibit
+prints spanning or stacked headers. Three things are worth naming
+because each is a defect that reads perfectly plausibly:
+
+- **An empty cell stays an empty cell.** `<td></td>`, never a dash
+  invented to fill it and never omitted, because omitting it slides
+  every value after it one column left.
+- **The caption is not a row.** Journals commonly print the caption
+  directly above the top rule, so it is often inside the crop; it
+  belongs to text.md and the manifest and appears here neither as a
+  row nor as a heading. The footnote lines under the table are inside
+  the crop too, and they are the manifest's `notes`.
+- **A footnote marker stays a marker.** A superscript on a count is
+  `<sup>a</sup>`, not a digit fused onto the number.
+
+Then check it, in this order:
+
+1. Structure, deterministically. `render_table.py` refuses to draw a
+   transcription that does not pass the format's own checks, so a
+   failure here is a dropped cell or a span one too small, named with
+   its position. Fix it before spending a look on it.
+
+       python tools/render_table.py bundles/{id}/tables/{label}.html \
+           --out work/{id}/table_renders/{label}.png
+
+   A table printed sideways gets `--rotate 90` (or 270), so the render
+   turns to match a crop that came off the page rotated. The
+   transcription itself is always written in reading order.
+2. Content, by eye. View the render beside the crop and ask one
+   question: do they say the same thing in the same arrangement? Same
+   cells in the same positions, same header structure and spans, same
+   characters including markers and dashes, the same cells empty. The
+   render will not look like the journal's typesetting, and it is not
+   meant to: the face is different, the rules are uniform, nothing is
+   shaded. Appearance is not what is being compared.
+3. Fix and repeat until they agree.
+
+A table whose characters cannot be trusted, and there will be some,
+does not get a guessed transcription. Delete the file and move on: the
+crop is the content, exactly as it was before this stage could do
+anything else. A missing transcription is honest and a wrong one is
+not, and nothing downstream can tell a wrong one from a right one.
+
 ## Outputs
 
 - `bundles/{id}/figures/{label}.png` for every skeleton exhibit, labels
@@ -84,11 +147,22 @@ if the parts cannot be joined sensibly; prefer the meaningful whole.
   crop, which includes the footnote lines. An exhibit without footnote
   text omits the key. The contract accepts nothing else per exhibit,
   and validate-bundle binds labels to files both ways.
+- `bundles/{id}/tables/{label}.html` for every table exhibit whose
+  content could be transcribed and checked, and no file at all for the
+  ones that could not. There is no key or marker recording which is
+  which: a file that is there has been through the checks above, and
+  absence means the crop is the content.
 - The exhibit's raw text-layer dump (the blocks its region covers) is
   saved to `work/{id}/exhibit_dumps/{label}.txt`. It stays out of the
   bundle; it exists so the sweep and any later audit can search what
   the pixels say without re-reading them.
+- `work/{id}/table_renders/{label}.png`, the render each transcription
+  was checked against. It stays out of the bundle and is handed to the
+  sweep.
 
 Before leaving the stage, count: skeleton exhibits, crops on disk, and
 manifest entries must match one to one to one. A mismatch is a loud
-stop, not a shrug.
+stop, not a shrug. Transcriptions are counted separately and against a
+different standard: every table exhibit either has one or was recorded
+in the run's notes as untranscribable, and every file in `tables/`
+belongs to a declared exhibit.

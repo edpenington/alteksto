@@ -1,0 +1,138 @@
+"""Offline tests for tools/render_table.py on invented transcriptions.
+
+The tool draws a table transcription so it can be held beside the crop it
+was made from. Nothing here reads the picture: what is asserted is that a
+picture is produced for a table, that none is produced for anything else,
+and that a sideways exhibit gets a render turned to match its crop.
+"""
+
+import pymupdf
+import pytest
+
+from conftest import load_tool
+
+# The shape the format exists to carry, and the shape a plain grid cannot:
+# a group header spanning two columns over a stub column that spans two
+# rows, with one cell the paper leaves empty.
+SPANNING = (
+    '<table><thead>'
+    '<tr><th rowspan="2" scope="col">Study</th>'
+    '<th colspan="2" scope="colgroup">Intervention</th></tr>'
+    '<tr><th scope="col">n</th><th scope="col">Mean (SD)</th></tr>'
+    '</thead><tbody>'
+    '<tr><td>Ashby 2019</td><td>142</td><td>12.4 (3.1)</td></tr>'
+    '<tr><td>Brune 2021<sup>a</sup></td><td>88</td><td></td></tr>'
+    '</tbody></table>'
+)
+
+
+@pytest.fixture(scope="session")
+def render_table_tool():
+    return load_tool("render_table")
+
+
+def write(tmp_path, markup, name="table_01.html"):
+    path = tmp_path / name
+    path.write_text(markup, encoding="utf-8")
+    return path
+
+
+def test_a_spanning_table_renders(render_table_tool, tmp_path):
+    source = write(tmp_path, SPANNING)
+    out = tmp_path / "renders" / "table_01.png"
+    assert render_table_tool.main([str(source), "--out", str(out)]) == 0
+    assert out.is_file()
+    pix = pymupdf.Pixmap(str(out))
+    assert pix.width > 100 and pix.height > 40
+
+
+def test_the_render_is_the_table_and_not_the_sheet(render_table_tool,
+                                                   tmp_path):
+    """A narrow table comes back narrow.
+
+    The story is laid out into a frame as wide as --width, so without
+    tightening to what was drawn every render would be a small table in a
+    large field of white, and two of them side by side would be mostly
+    margin.
+    """
+    source = write(tmp_path, "<table><tr><td>x</td></tr></table>")
+    out = tmp_path / "tiny.png"
+    assert render_table_tool.main([str(source), "--out", str(out),
+                                   "--width", "760", "--dpi", "150"]) == 0
+    pix = pymupdf.Pixmap(str(out))
+    assert pix.width < 760 * 150 / 72 / 4
+
+
+def test_rotation_turns_the_render_to_match_a_sideways_crop(
+        render_table_tool, tmp_path):
+    source = write(tmp_path, SPANNING)
+    upright = tmp_path / "upright.png"
+    turned = tmp_path / "turned.png"
+    assert render_table_tool.main([str(source), "--out", str(upright)]) == 0
+    assert render_table_tool.main([str(source), "--out", str(turned),
+                                   "--rotate", "90"]) == 0
+    before = pymupdf.Pixmap(str(upright))
+    after = pymupdf.Pixmap(str(turned))
+    assert (after.width, after.height) == (before.height, before.width)
+
+
+def test_prose_is_refused_rather_than_drawn(render_table_tool, tmp_path,
+                                            capsys):
+    """The one silent failure this tool could produce.
+
+    A file of prose lays out perfectly happily and would come back as a
+    good picture of the wrong thing, which the comparison step might well
+    accept. It is refused by the format's own rule, not by a second
+    opinion formed here.
+    """
+    source = write(tmp_path, "The table could not be read.")
+    out = tmp_path / "prose.png"
+    assert render_table_tool.main([str(source), "--out", str(out)]) == 1
+    assert not out.exists()
+    assert "contains no <table>" in capsys.readouterr().err
+
+
+def test_a_holed_grid_is_refused_with_its_position(render_table_tool,
+                                                   tmp_path, capsys):
+    source = write(tmp_path, '<table><tr><th colspan="2">Wide</th></tr>'
+                             '<tr><td>a</td></tr></table>')
+    out = tmp_path / "holed.png"
+    assert render_table_tool.main([str(source), "--out", str(out)]) == 1
+    assert not out.exists()
+    assert "leaves row 1 column 1 uncovered" in capsys.readouterr().err
+
+
+def test_a_missing_source_is_a_loud_failure(render_table_tool, tmp_path,
+                                            capsys):
+    out = tmp_path / "absent.png"
+    assert render_table_tool.main([str(tmp_path / "nope.html"),
+                                   "--out", str(out)]) == 1
+    assert "transcription missing" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("flag, value", [("--width", "0"), ("--dpi", "0")])
+def test_nonsense_dimensions_are_refused(render_table_tool, tmp_path,
+                                         capsys, flag, value):
+    source = write(tmp_path, SPANNING)
+    assert render_table_tool.main([str(source), "--out",
+                                   str(tmp_path / "x.png"),
+                                   flag, value]) == 1
+    assert "must be positive" in capsys.readouterr().err
+
+
+def test_a_long_table_grows_the_page_rather_than_splitting(
+        render_table_tool, tmp_path):
+    """One exhibit is one picture, because one crop is what it faces.
+
+    A table taller than the starting frame is laid out again into a taller
+    one. If it were allowed to overflow instead, the render would show the
+    first page of the transcription and the comparison would silently be
+    against part of it.
+    """
+    rows = "".join(f"<tr><td>Row {n}</td><td>{n}</td></tr>"
+                   for n in range(300))
+    source = write(tmp_path, f"<table>{rows}</table>")
+    out = tmp_path / "long.png"
+    assert render_table_tool.main([str(source), "--out", str(out)]) == 0
+    pix = pymupdf.Pixmap(str(out))
+    assert pix.height > 2000

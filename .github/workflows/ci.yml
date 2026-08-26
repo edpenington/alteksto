@@ -66,18 +66,37 @@ jobs:
           for absent in ("pymupdf", "fitz", "lxml"):
               assert u.find_spec(absent) is None, f"{absent} unexpectedly installed"
           import json, pathlib, sys
-          from alteksto.bundle import figure_files, validate_bundle
+          from alteksto.bundle import (SCHEMA_VERSION, figure_files,
+                                       table_files, validate_bundle)
           root = pathlib.Path("bundle")
           (root / "figures").mkdir(parents=True)
+          (root / "tables").mkdir(parents=True)
           (root / "text.md").write_text("# An invented paper\n\nBody.\n")
           (root / "figures" / "table_01.png").write_bytes(b"\x89PNG invented")
+          # A spanning header, so the structural check is genuinely exercised
+          # here and not just the file listing: the grid is what a consumer
+          # installing the contract alone still gets.
+          (root / "tables" / "table_01.html").write_text(
+              '<table><thead>'
+              '<tr><th rowspan="2">Season</th><th colspan="2">Cut</th></tr>'
+              '<tr><th>n</th><th>Mean</th></tr></thead>'
+              '<tbody><tr><td>April</td><td>12</td><td>4.8</td></tr>'
+              '</tbody></table>')
           (root / "manifest.json").write_text(json.dumps({
-              "schema_version": 2, "id": "inv-01", "title": "An invented paper",
+              "schema_version": SCHEMA_VERSION, "id": "inv-01",
+              "title": "An invented paper",
               "exhibits": [{"label": "table_01", "caption": "Table 1.",
                             "notes": "Invented footnote."}],
           }))
           assert validate_bundle(root) == [], validate_bundle(root)
           assert list(figure_files(root)) == ["table_01"]
+          assert list(table_files(root)) == ["table_01"]
+          # And the grid check refuses a dropped cell with no parser installed.
+          (root / "tables" / "table_01.html").write_text(
+              "<table><tr><th>a</th><th>b</th></tr>"
+              "<tr><td>only one</td></tr></table>")
+          assert any("uncovered" in p for p in validate_bundle(root))
           assert "pymupdf" not in sys.modules
+          assert "lxml" not in sys.modules
           print("ok: the contract holds on the standard library alone")
           PY

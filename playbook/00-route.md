@@ -34,11 +34,15 @@ the bundle:
       web.md               PMC full text, when it exists
       skeleton.json        stage 3's inventory, the coverage contract
       exhibit_dumps/       raw text-layer blocks under each crop region
+      table_renders/       each table transcription drawn, for comparison
+                           against its crop
       refs-report.md       the reference canary's verdicts
       sweep-report.md      the fresh-context sweep's findings
 
-The bundle lands in `bundles/{id}/` as `manifest.json`, `text.md`, and
-`figures/*.png`, exactly per the contract (see quality.md).
+The bundle lands in `bundles/{id}/` as `manifest.json`, `text.md`,
+`figures/*.png`, and `tables/*.html` for the table exhibits whose
+content was transcribed and checked, exactly per the contract (see
+quality.md).
 
 ## Rules that span every stage
 
@@ -86,6 +90,8 @@ through the project venv.
     python tools/fetch_pmc.py work/{id} --doi DOI
     python tools/crop.py work/{id}/pages/page_NN.png --box X0 Y0 X1 Y1
         [--box ...] [--space W H] --out bundles/{id}/figures/{label}.png
+    python tools/render_table.py bundles/{id}/tables/{label}.html
+        --out work/{id}/table_renders/{label}.png [--rotate 90]
     python tools/validate_bundle.py bundles/{id}
     python tools/check_refs.py work/{id} --text bundles/{id}/text.md
 

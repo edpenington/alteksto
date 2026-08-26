@@ -12,7 +12,9 @@ that checkout as your working directory: every path below is relative
 to it.
 
 Inputs, all under the paper's directories: the bundle's
-`bundles/{id}/text.md` and `figures/`, the renders
+`bundles/{id}/text.md`, `figures/` and `tables/` (the table
+transcriptions, where the bundle has them, each drawn to
+`work/{id}/table_renders/{label}.png`), the renders
 `work/{id}/pages/page_NN.png`, `work/{id}/blocks.json` (the text
 layer with its emphasis runs, the cheap character and styling
 witness), `work/{id}/skeleton.json`, `work/{id}/triage.json`, and
@@ -48,5 +50,13 @@ Rules:
   prints is correct by definition, however odd. Label those `source`.
 - Check every skeleton unit's edges and every exhibit against the
   crops in figures/; a crop that clips content is a finding.
+- Check every table transcription against its exhibit: the render in
+  `work/{id}/table_renders/` beside the crop. Same cells in the same
+  positions, same header structure and spans, same characters, the
+  same cells empty. The render is deliberately plain and will not look
+  like the journal's typesetting, so report content and arrangement
+  and never styling. A transcription you cannot confirm is reported
+  for deletion rather than correction: the crop is the content
+  whenever there is no transcription.
 - An empty report is a report: say explicitly that you checked every
   page and found nothing.

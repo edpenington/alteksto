@@ -1,10 +1,10 @@
 # alteksto
 
 One paper PDF becomes one paper bundle: markdown full text, cropped
-figures and tables, and a manifest, faithful to the page down to the
-characters. The bundle format is specified in `docs/bundle.md`,
-enforced by `tools/validate_bundle.py`, and consumed downstream by
-*meltiro* (github.com/edpenington/meltiro).
+figures and tables, the tables also as text, and a manifest, faithful
+to the page down to the characters. The bundle format is specified in
+`docs/bundle.md`, enforced by `tools/validate_bundle.py`, and consumed
+downstream by *meltiro* (github.com/edpenington/meltiro).
 
 The conversion is agentic, and the playbook is the product: `playbook/`
 holds the prompts that teach an agent what a good extraction looks
@@ -64,7 +64,11 @@ and says so loudly rather than guessing when it cannot.
   layer's font flags, and the source's own defects preserved, because
   correcting a paper is fabrication.
 - **Figures** crops every exhibit from the renders, inspects each
-  crop, and carries printed exhibit footnotes into the manifest.
+  crop, and carries printed exhibit footnotes into the manifest. A
+  table also gets its content as text, checked by rendering the
+  transcription back to an image and holding it beside the crop, so a
+  consumer can quote a cell instead of sending a model to read the
+  rows off pixels.
 - **Gates** hold the result: `validate_bundle.py` proves the shape,
   a deterministic reference canary resolves any printed DOIs, and a
   fresh-context sweep reads the paper against the renders and reports

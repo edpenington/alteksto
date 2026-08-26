@@ -12,13 +12,19 @@ specification is `docs/bundle.md`, and `tools/validate_bundle.py`
 enforces it; downstream consumers (*meltiro* first among them) accept
 what passes here. The load-bearing points:
 
-- `bundles/{id}/` holds `manifest.json`, `text.md`, and
-  `figures/*.png`. Nothing else is read; extra files are ignored.
-- The manifest carries `schema_version` (2), `id`, `title`, `exhibits`,
+- `bundles/{id}/` holds `manifest.json`, `text.md`, `figures/*.png`,
+  and optionally `tables/*.html`. Nothing else is read; extra files are
+  ignored.
+- The manifest carries `schema_version` (3), `id`, `title`, `exhibits`,
   and optionally `doi` and `summary`. Unknown keys are rejected. Each
   exhibit entry is `{"label", "caption"}` plus optional `notes` (the
   exhibit's printed footnote text); every declared label must have its
   PNG and every PNG its declaration.
+- A table exhibit may also carry its content as text in
+  `tables/{label}.html`, checked structurally by the validator and
+  against the crop by the figure stage. It is beside the crop, never
+  instead of it. There is no marker for a transcription that was not
+  attempted or could not be trusted: the file is there or it is not.
 - Extraction evidence is later quoted **verbatim** against text.md,
   markdown syntax included. The formatting rules below keep those
   quotes predictable: what the paper prints is what text.md carries,
@@ -69,11 +75,14 @@ as printed.
       [TABLE 2. Caption exactly as printed.]
 
   The sentinel's number and caption match the manifest entry. Table
-  content is not duplicated as markdown in the text; the crop is the
-  content. The exhibit's footnote lines are part of the exhibit: the
-  crop includes them and the manifest's `notes` carries their text,
-  and they never appear beside the sentinel. Figure-internal text is
-  never transcribed.
+  content never appears in text.md: the crop is the exhibit, and a
+  table's content is transcribed to `tables/{label}.html` instead,
+  where a consumer can find it without it landing in the middle of
+  the prose a quote is checked against. The exhibit's footnote lines
+  are part of the exhibit: the crop includes them and the manifest's
+  `notes` carries their text, and they never appear beside the
+  sentinel. Figure-internal text is never transcribed, in text.md or
+  anywhere else: a figure's content is its pixels.
 - **Footnotes land where they belong.** Author, correspondence, and
   affiliation notes join front matter; exhibit footnotes belong to the
   exhibit (crop and manifest `notes`, see above); a genuine content
@@ -145,6 +154,26 @@ then the witness that causes them.
 - Decorations proposed as figures: publisher logos, cover thumbnails.
 - Tables never proposed at all.
 - Per-page coordinate spaces that never match the render's DPI.
+
+### Defects a transcription causes
+
+- Empty cells dropped rather than transcribed as empty, sliding every
+  value after them one column left. The grid check catches this only
+  when the row ends short; a row that also gained a cell tiles
+  perfectly and is wrong.
+- The printed caption transcribed as a header row, because the crop
+  shows it: journals often print it directly above the top rule.
+  Footnote lines transcribed as a final row for the same reason.
+- Spanning group headers given the wrong `colspan`, so the header sits
+  over the wrong columns while every cell is individually correct.
+- A rowspan widened to silence a reported hole. The validator refuses a
+  span reaching past the last row for exactly this reason: it makes the
+  complaint go away and leaves the missing row missing, and the right
+  and wrong versions draw identically, so the render cannot catch it.
+- Footnote markers fused into counts ("N = 2,0891") when the marker is
+  read off the layer rather than seen as a superscript on the crop.
+- Numbers silently improved: a range tidied, a decimal aligned, a
+  thousands separator added where the paper prints none.
 
 ### Defects the web witness causes
 

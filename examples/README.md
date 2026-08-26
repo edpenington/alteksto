@@ -21,8 +21,16 @@ binary is built whenever it is wanted.
 
     build_pdf.py            the paper, as the code that prints it
     expected/skeleton.json  the inventory stage 3 should arrive at
-    expected/bundle/        text.md and manifest.json, the bundle to match
+    expected/bundle/        text.md, manifest.json and tables/, the
+                            bundle to match
     expected/crops.json     the crop region for each exhibit
+
+`expected/bundle/tables/table_01.html` is the printed table as text,
+the transcription a correct figure stage arrives at. The paper prints
+one plain table, so it exercises the format rather than its harder
+shapes; spanning headers, empty cells and the ways a grid can fail to
+tile are covered by `tests/test_validate_bundle.py`, where a wrong
+table can be written down beside the right one.
 
 There is no `expected/bundle/figures/`, because a PNG is a binary.
 `crops.json` records each exhibit's page and box instead, so a run cuts

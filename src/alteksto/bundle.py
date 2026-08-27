@@ -1113,7 +1113,9 @@ def _supplement_problems(root: Path, manifest_id):
     # None from a lookup, and only one of them has already been reported.
     # Read as a lookup, `"supplements": null` was accepted in silence.
     if "supplements" in data:
-        declared = _supplement_entry_problems(data["supplements"], problems)
+        entry_problems, declared = _supplement_entry_problems(
+            data["supplements"])
+        problems.extend(entry_problems)
     else:
         declared = None
     if declared is None:
@@ -1140,25 +1142,26 @@ def _stray_supplement_files(root: Path) -> list[str]:
             if not child.name.startswith(".") and not child.is_dir()]
 
 
-def _supplement_entry_problems(value, problems):
-    """Every problem with the declaration's supplements list, appended to
-    `problems`; returns {name: labels}.
+def _supplement_entry_problems(value):
+    """Return (problems, declared) for the declaration's supplements list.
 
-    None when the block is malformed enough that cross-checking it against
-    the directories would bury the report under derived noise.
+    declared is {name: labels}, and None when the block is malformed enough
+    that cross-checking it against the directories would bury the report
+    under derived noise.
     """
+    problems: list[str] = []
     if not isinstance(value, list):
         problems.append(f"supplements.json key 'supplements' must be a list "
                         f"of {{name, title, exhibits}} objects, got "
                         f"{type(value).__name__}")
-        return None
+        return problems, None
     if not value:
         # Unlike the manifest's exhibits, an empty list here asserts
         # nothing: a paper with no supplements has no supplements.json,
         # which is the same statement without a file to keep in step.
         problems.append("supplements.json declares no supplements; a paper "
                         "with none omits the file")
-        return None
+        return problems, None
     declared: dict[str, list[str]] = {}
     malformed = False
     for index, entry in enumerate(value):
@@ -1216,7 +1219,7 @@ def _supplement_entry_problems(value, problems):
             malformed = True
             continue
         declared[name] = labels
-    return None if malformed else declared
+    return problems, (None if malformed else declared)
 
 
 def _cross_check_label_uniqueness(article_labels, supplements) -> list[str]:

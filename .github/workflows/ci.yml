@@ -74,7 +74,7 @@ jobs:
           (root / "figures").mkdir(parents=True)
           (root / "tables").mkdir(parents=True)
           (root / "text.md").write_text("# An invented paper\n\nBody.\n")
-          (root / "figures" / "table_01.png").write_bytes(b"\x89PNG invented")
+          (root / "figures" / "table_01.png").write_bytes(b"\x89PNG\r\n\x1a\n invented bytes")
           # A spanning header, so the structural check is genuinely exercised
           # here and not just the file listing: the grid is what a consumer
           # installing the contract alone still gets.
@@ -97,7 +97,7 @@ jobs:
           (supplement / "figures").mkdir(parents=True)
           (supplement / "text.md").write_text("# Appendix A\n\nProse.\n")
           (supplement / "figures" / "appendix_a_table_01.png").write_bytes(
-              b"\x89PNG invented")
+              b"\x89PNG\r\n\x1a\n invented bytes")
           (root / "supplements.json").write_text(json.dumps({
               "id": "inv-01",
               "supplements": [{"name": "appendix_a",

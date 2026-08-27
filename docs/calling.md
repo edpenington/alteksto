@@ -2,16 +2,27 @@
 
 This page is for an agent or a session that has papers to convert and
 wants bundles back. It is the whole contract. Calling alteksto needs
-nothing from `playbook/`, which is the converter's manual, written to
-the agent doing one paper, and turns whoever reads it into a converter.
+nothing from an engine's playbook, which is the converter's manual,
+written to the agent doing one paper, and turns whoever reads it into a
+converter.
+
+## Which engine
+
+alteksto keeps more than one way of converting a paper, one directory
+per engine under `engines/`, and they are compared by what they emit
+rather than by how they work. Everything below is the same whichever you
+call: only the converter's name changes, and it carries the engine's.
+The engine shipped here is walk, whose converter is
+`prepare-paper-walk`, and it is the right default when you have no
+reason to want another. `engines/README.md` lists what a checkout holds.
 
 ## The rule
 
-One paper, one converter agent. A caller stages inputs, spawns an
-agent of type `prepare-paper` per paper, and reads results off disk.
-A caller never converts a paper in its own context, however few the
-papers are: the conversion wants a full context per paper for renders
-and crops, and a caller that starts one has nothing left for the rest.
+One paper, one converter agent. A caller stages inputs, spawns one
+converter per paper, and reads results off disk. A caller never converts
+a paper in its own context, however few the papers are: the conversion
+wants a full context per paper for renders and crops, and a caller that
+starts one has nothing left for the rest.
 
 ## What you supply
 
@@ -35,22 +46,25 @@ detect, because nothing downstream re-examines the question.
 
 ## Staging
 
-`tools/stage.py` puts a PDF at `work/{id}/source.pdf`, which is where
-the converter looks. When you already know which file is which:
+Staging belongs to the engine, because what an engine wants on disk is
+its own business. Walk's puts a PDF at `work/{id}/source.pdf`, which is
+where its converter looks. When you already know which file is which:
 
-    python tools/stage.py --id ID --pdf PATH --work work
-    python tools/stage.py --map-file id-to-path.json --work work
+    python engines/walk/tools/stage.py --id ID --pdf PATH --work work
+    python engines/walk/tools/stage.py --map-file id-to-path.json \
+        --work work
 
 A supplement is staged under the paper it belongs to:
 
-    python tools/stage.py --id ID --pdf PATH --supplement NAME --work work
+    python engines/walk/tools/stage.py --id ID --pdf PATH \
+        --supplement NAME --work work
 
 When you have a folder of downloads and a registry that names the
 papers, it matches them for you, scoring each file's front matter
 against the records:
 
-    python tools/stage.py --from DIR --registry FILE [--records KEY] \
-        --work work
+    python engines/walk/tools/stage.py --from DIR --registry FILE \
+        [--records KEY] --work work
 
 It stages the confident matches and prints one line per paper on
 stdout, `id`, source path, action, which is the list you spawn from.
@@ -61,11 +75,12 @@ which paper it is.
 
 ## Spawning
 
-One agent of type `prepare-paper` per staged id, in waves of about
-four, because each converter renders pages, calls OCR, and views crops.
-The converter works inside this checkout and every path in the playbook
-is relative to it, so a caller working in another repository names the
-checkout in the prompt and keeps its own paths out:
+One converter per staged id, in waves of about four, because each one
+renders pages, calls OCR, and views crops. For walk that is an agent of
+type `prepare-paper-walk`. The converter works inside this checkout and
+every path in its playbook is relative to it, so a caller working in
+another repository names the checkout in the prompt and keeps its own
+paths out:
 
     Convert paper {id}. Your working directory is {checkout}; every path
     in the playbook is relative to it. The PDF is at

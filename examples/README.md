@@ -1,9 +1,11 @@
 # The worked example
 
 One invented mini-paper, three pages, small enough to hold in the head
-and still carrying the hazards the route exists to handle. Agent runs
-against it are manual; the toolbelt runs against it in CI, as
-`tests/test_example.py`.
+and still carrying the hazards a conversion exists to handle. It is
+shared by every engine on purpose: comparing two engines means giving
+them the same paper and holding the results side by side. Agent runs
+against it are manual; walk's toolbelt runs against it in CI, as
+`tests/engines/walk/test_example.py`.
 
 Nothing here is a real paper. The levels, the herons, the wardens, the
 journal, and the references are all invented, which is why this
@@ -15,26 +17,36 @@ directory can live in git when `work/` and `bundles/` cannot.
 
 writes `work/example/source.pdf` and, with `--supplement`,
 `work/example/supplements/supplement_a/source.pdf` where a staged
-supplement would sit. A work directory like any other from there on. No PDF is committed: `build_pdf.py` is the source, and the
-binary is built whenever it is wanted.
+supplement would sit. A work directory like any other from there on. No
+PDF is committed: `build_pdf.py` is the source, and the binary is built
+whenever it is wanted.
 
 ## What is committed
 
+Here, because every engine is given the same paper and judged on the
+same target:
+
     build_pdf.py            the paper and its supplement, as the code
                             that prints them
-    expected/skeleton.json  the inventory stage 3 should arrive at
     expected/bundle/        text.md, manifest.json, tables/ and
                             supplements/, the bundle to match
-    expected/crops.json     the crop region for each exhibit, the
-                            supplement's under its own key
+
+And with the engine, because the road there is the engine's own and a
+second engine need not pass through the same places:
+
+    engines/walk/example/skeleton.json  the inventory walk's stage 3
+                                        should arrive at
+    engines/walk/example/crops.json     the crop region for each
+                                        exhibit, the supplement's under
+                                        its own key
 
 `expected/bundle/tables/table_01.html` is the printed table as text,
 the transcription a correct figure stage arrives at. The paper's own
 table is plain, so the supplement prints the harder shape: a group
 header spanning two columns over a stub spanning two rows, and two
 cells the survey left empty. The ways a grid can fail to tile are
-covered by `tests/test_validate_bundle.py`, where a wrong table can be
-written down beside the right one.
+covered by `tests/contract/test_validate_bundle.py`, where a wrong table
+can be written down beside the right one.
 
 `expected/bundle/supplements/` and `expected/bundle/supplements.json`
 are Supplement A converted as its own thing. Its prose is in its own
@@ -43,9 +55,11 @@ paper's text.md nor its manifest moves when the supplement is added,
 which is what lets a consumer identify the article by those bytes
 whether or not the supplement is there yet.
 
-There is no `expected/bundle/figures/`, because a PNG is a binary.
-`crops.json` records each exhibit's page and box instead, so a run cuts
-the same pixels from its own 150 DPI render and compares those.
+There is no `expected/bundle/figures/`, because a PNG is a binary. Walk
+records each exhibit's page and box in its own `crops.json` instead, so
+a run cuts the same pixels from its own 150 DPI render and compares
+those. An engine that finds exhibits another way records whatever it
+needs in its own example directory.
 
 ## The hazards it plants
 
@@ -64,10 +78,11 @@ the same pixels from its own 150 DPI render and compares those.
 - a sentence that begins on page two and finishes on page three;
 - three references, one of them printing a DOI.
 
-## The run, as the playbook now shapes it
+## The run, as the walk playbook shapes it
 
-One context converts and the sweep is the fresh eyes. The
-expected files are the checkpoints to compare against, stage by stage.
+One engine's path through this paper, and the one CI exercises. One
+context converts and the sweep is the fresh eyes. The expected files are
+the checkpoints to compare against, stage by stage.
 
 1. **Triage.** Render and dump. The layer is healthy and reads as
    language, so the paper is `born_digital` and the text layer is the
@@ -79,17 +94,17 @@ expected files are the checkpoints to compare against, stage by stage.
    at all: both exhibits are located from the render, which is the path
    every table takes anyway.
 3. **Skeleton.** Ten units over three pages, two exhibits, three
-   references. Against `expected/skeleton.json`: the page spans cover 1
-   to 3 with no gaps, there is a single depth 1 unit, and unit 7 carries
-   the note that it crosses the page join.
+   references. Against `engines/walk/example/skeleton.json`: the page
+   spans cover 1 to 3 with no gaps, there is a single depth 1 unit, and
+   unit 7 carries the note that it crosses the page join.
 4. **Walk.** Unit by unit against the skeleton. The two seams that
    matter are the float interposed inside 2.2 and the mid-sentence join
    between pages two and three, where page two ends "of the opposite
    sign, a". Against `expected/bundle/text.md`: character-faithful to
    what the page prints, the hyphen healed, the furniture gone, the
    emphasis carried, the exhibits standing as sentinels.
-5. **Figures.** Two crops. Against `expected/crops.json` for the
-   regions, and the manifest for the entries: the table's printed
+5. **Figures.** Two crops. Against `engines/walk/example/crops.json` for
+   the regions, and the manifest for the entries: the table's printed
    footnote becomes its `notes`, and the figure, having none, omits the
    key.
 6. **Gates.** `validate_bundle.py` passes clean on the assembled

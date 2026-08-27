@@ -7,9 +7,9 @@
 # papers and ids and calls out to alteksto, whose sessions cannot see
 # anything that lives here.
 #
-# It builds the virtual environment, then registers the skill and the
-# two agent types under ~/.claude. The registrations are symlinks, so
-# pulling this repository updates them; the checkout's location is
+# It builds the virtual environment, then registers the skill and each
+# engine's agent types under ~/.claude. The registrations are symlinks,
+# so pulling this repository updates them; the checkout's location is
 # passed separately, as ALTEKSTO_HOME in ~/.claude/settings.json, which
 # is what lets the linked files stay free of any path from any one
 # machine.
@@ -55,12 +55,40 @@ run() {
 
 say "checkout at ${ROOT}"
 
+# An engine's agents carry its name, because asking for a conversion
+# means asking a particular engine for one. A second engine adds its own
+# pair here; nothing else in this script knows how many there are.
 LINK_PATHS=("${CLAUDE_DIR}/skills/alteksto"
-            "${CLAUDE_DIR}/agents/prepare-paper.md"
-            "${CLAUDE_DIR}/agents/sweep-paper.md")
+            "${CLAUDE_DIR}/agents/prepare-paper-walk.md"
+            "${CLAUDE_DIR}/agents/sweep-paper-walk.md")
 LINK_TARGETS=("${ROOT}/.claude/skills/alteksto"
-              "${ROOT}/.claude/agents/prepare-paper.md"
-              "${ROOT}/.claude/agents/sweep-paper.md")
+              "${ROOT}/engines/walk/agents/prepare-paper.md"
+              "${ROOT}/engines/walk/agents/sweep-paper.md")
+
+# Names this checkout registered before an engine's agents carried its
+# name. The rename left them pointing at files that have moved into the
+# engine, so an install predating it leaves two dead links behind that
+# nothing else here would mention: they are not in LINK_PATHS, so the
+# removal below does not take them back and the health check does not
+# read them. Only a link into this checkout is ours to drop; one naming
+# somewhere else belongs to that install.
+LEGACY_PATHS=("${CLAUDE_DIR}/agents/prepare-paper.md"
+              "${CLAUDE_DIR}/agents/sweep-paper.md")
+
+drop_legacy() {
+    local path target
+    for path in "${LEGACY_PATHS[@]}"; do
+        [ -L "${path}" ] || continue
+        target="$(readlink "${path}")"
+        case "${target}" in
+            "${ROOT}"/*)
+                run rm "${path}"
+                [ "$DRY_RUN" = 1 ] || say "removed stale name: ${path}"
+                ;;
+            *) say "left alone (points elsewhere): ${path}" ;;
+        esac
+    done
+}
 
 # Removal takes back exactly what this checkout registered. A link
 # pointing at some other checkout belongs to that one, a real file
@@ -83,10 +111,11 @@ if [ "$UNINSTALL" = 1 ]; then
             say "left alone (not a link): ${path}"
         fi
     done
+    drop_legacy
     if [ "$DRY_RUN" = 1 ]; then
-        say "would remove ${removed} of 3 registrations"
+        say "would remove ${removed} of ${#LINK_PATHS[@]} registrations"
     else
-        say "${removed} of 3 registrations removed"
+        say "${removed} of ${#LINK_PATHS[@]} registrations removed"
     fi
 
     if [ -f "${SETTINGS}" ] && [ "$DRY_RUN" = 0 ]; then
@@ -123,9 +152,9 @@ PY
     exit 0
 fi
 
-# The virtual environment. Producing a bundle needs the page stack, which
-# is the [tools] extra that [dev] already pulls in. --links-only skips
-# this for an environment somebody else manages.
+# The virtual environment. Producing a bundle needs an engine's page
+# stack, which is the extra that [dev] already pulls in for every engine.
+# --links-only skips this for an environment somebody else manages.
 if [ "$LINKS_ONLY" = 1 ]; then
     say "skipping venv (--links-only)"
 elif [ -x "${ROOT}/.venv/bin/python" ]; then
@@ -159,6 +188,7 @@ link() {
 }
 
 run mkdir -p "${CLAUDE_DIR}/skills" "${CLAUDE_DIR}/agents"
+drop_legacy
 for index in "${!LINK_PATHS[@]}"; do
     link "${LINK_TARGETS[$index]}" "${LINK_PATHS[$index]}"
 done
@@ -219,8 +249,9 @@ fi
 # use.
 if [ "$DRY_RUN" = 0 ]; then
     broken=0
-    for path in "${CLAUDE_DIR}/skills/alteksto/SKILL.md" \
-                "${LINK_PATHS[1]}" "${LINK_PATHS[2]}"; do
+    checks=("${CLAUDE_DIR}/skills/alteksto/SKILL.md"
+            "${LINK_PATHS[@]:1}")
+    for path in "${checks[@]}"; do
         [ -e "${path}" ] || { say "BROKEN: ${path} resolves to nothing"; \
                               broken=1; }
     done
@@ -229,7 +260,7 @@ if [ "$DRY_RUN" = 0 ]; then
         say "alteksto skill and say nothing about it"
         exit 1
     fi
-    say "all three registrations resolve"
+    say "all ${#checks[@]} registrations resolve"
 fi
 
 say "done. In a new session, from any repository, say:"

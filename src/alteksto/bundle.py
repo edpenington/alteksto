@@ -37,92 +37,6 @@ from pathlib import Path
 
 SCHEMA_VERSION = 5
 
-# The elements a table transcription may use. The list is short on purpose:
-# it is everything needed to say what a printed table says, and nothing that
-# carries presentation, scripting or a second document inside the first.
-# `caption` is absent deliberately and reported by name below, because a
-# caption is carried by text.md and the manifest and a crop that bakes the
-# printed caption into the image invites an author to repeat it here.
-_TABLE_ELEMENTS = frozenset({
-    "table", "thead", "tbody", "tr", "th", "td",
-    "sup", "sub", "br", "em", "strong",
-})
-# Elements a table's cells may contain, and which may nest in each other.
-_INLINE_ELEMENTS = frozenset({"sup", "sub", "br", "em", "strong"})
-_CELL_ELEMENTS = frozenset({"th", "td"})
-_ROW_GROUPS = frozenset({"thead", "tbody"})
-# `br` is the only element written in the self-closing form; every other
-# element in the whitelist is opened and closed.
-_VOID_ELEMENTS = frozenset({"br"})
-# Elements named in a problem when they appear, rather than being reported
-# as merely unknown, because each is a thing an author plausibly reaches for
-# and the reason it is refused is not guessable from a whitelist.
-_TABLE_ELEMENT_NOTES = {
-    "caption": "the exhibit's caption is carried by text.md and the "
-               "manifest, never repeated here",
-    "tfoot": "the exhibit's printed footnote is the manifest's 'notes'; a "
-             "totals row is an ordinary row of tbody",
-    "colgroup": "column styling is presentation, and the transcription "
-                "carries content only",
-    "col": "column styling is presentation, and the transcription carries "
-           "content only",
-    "style": "a transcription carries no styling",
-    "script": "a transcription carries no scripting",
-    "img": "a transcription carries no images; the crop is the image",
-    "a": "a link is presentation here; the printed characters are the "
-         "content",
-}
-# Attributes each element may carry. Everything else, `style` and `class`
-# included, is refused: they say how a table looks, and how it looks is what
-# the crop is for.
-_TABLE_ATTRIBUTES = {
-    "th": frozenset({"colspan", "rowspan", "scope"}),
-    "td": frozenset({"colspan", "rowspan"}),
-}
-# An upper bound on one span. No printed table spans a thousand columns, and
-# without a bound a malformed `rowspan="99999999"` would have the grid below
-# allocate until the process died. A bundle is input, so it gets a limit.
-_SPAN_LIMIT = 1000
-# And an upper bound on the grid those spans describe, which the span limit
-# alone does not give: twenty cells of `colspan="1000"` beside one
-# `rowspan="1000"` is a 26 KB file describing twenty million positions, and
-# walking them to report the holes is work a bundle should not be able to
-# ask for. Gate 1 runs this on every conversion and `render_table.py` runs
-# it before it draws, so the bound is what keeps both cheap. No printed
-# exhibit comes near it.
-_GRID_LIMIT = 100_000
-
-# supplements.json: the paper's identity, and the supplements it carries.
-# No schema_version of its own; one bundle declares one version, in the
-# manifest, and this file is part of that bundle rather than beside it.
-_SUPPLEMENTS_FIELDS = ("id", "supplements")
-# One supplement entry. `name` is the directory and the token a consumer
-# asks for; `title` is what the paper calls it, which is what a consumer
-# chooses by; `exhibits` is declared on exactly the manifest's terms.
-_SUPPLEMENT_KEYS = ("name", "title", "exhibits")
-
-# Manifest field contract: name -> (required?, type, allow_empty?). `str`
-# covers the JSON string type; bool is deliberately not a valid int (see
-# _is_int) so `schema_version: true` is rejected. `exhibits` has its own
-# validator and no emptiness flag: an empty list is a legitimate assertion
-# that the paper has no tables and no figures.
-_MANIFEST_FIELDS = {
-    "schema_version": (True, "int", None),
-    "id": (True, "str", False),
-    "title": (True, "str", False),
-    "exhibits": (True, "exhibits", None),
-    "doi": (False, "str", True),
-    # Optional, but empty-if-present is a mistake, not a signal.
-    "summary": (False, "str", False),
-}
-
-# The key set of one exhibits entry: label and caption required, notes
-# optional (the exhibit's printed footnote text, non-empty when present),
-# nothing else accepted, on the same terms as the manifest's own key
-# contract.
-_EXHIBIT_KEYS = ("label", "caption")
-_EXHIBIT_OPTIONAL_KEYS = ("notes",)
-
 
 def name_problem(value, what="name", where="", because=None):
     r"""Why a name may not become a path in a bundle, or None if it may.
@@ -168,12 +82,6 @@ def name_problem(value, what="name", where="", because=None):
     return f"{problem}: {because}" if because else problem
 
 
-def _is_int(value) -> bool:
-    """True for a genuine JSON integer. Rejects bool (a Python int
-    subclass) so `schema_version: true` does not sneak through."""
-    return isinstance(value, int) and not isinstance(value, bool)
-
-
 def bundle_problems(path) -> list[str]:
     """Return a list of ALL problems with the bundle at path.
 
@@ -210,37 +118,33 @@ def bundle_problems(path) -> list[str]:
     return problems
 
 
-def _supplement_contents_problems(root: Path, supplements) -> list[str]:
-    """Each declared supplement's own text, figures and tables.
+# Manifest field contract: name -> (required?, type, allow_empty?). `str`
+# covers the JSON string type; bool is deliberately not a valid int (see
+# _is_int) so `schema_version: true` is rejected. `exhibits` has its own
+# validator and no emptiness flag: an empty list is a legitimate assertion
+# that the paper has no tables and no figures.
+_MANIFEST_FIELDS = {
+    "schema_version": (True, "int", None),
+    "id": (True, "str", False),
+    "title": (True, "str", False),
+    "exhibits": (True, "exhibits", None),
+    "doi": (False, "str", True),
+    # Optional, but empty-if-present is a mistake, not a signal.
+    "summary": (False, "str", False),
+}
 
-    A supplement directory is shaped like the bundle it sits in, so the
-    same checks run over it with only a prefix changed: what is a crop,
-    what is a transcription, and what binds them to a declaration are
-    rules of the format, and a supplement does not get its own version of
-    any of them. Only the declaring file differs, which is why the
-    problems say supplements.json rather than manifest.json.
-    """
-    problems: list[str] = []
-    present = supplement_dirs(root)
-    for name in sorted(supplements):
-        if name not in present:
-            continue  # already reported as declared with no directory, and
-            # walking it would report every one of its exhibits again
-        labels = supplements[name]
-        supplement = root / "supplements" / name
-        prefix = f"supplements/{name}/"
-        figure_problems, present = _figure_problems(supplement, prefix)
-        table_problems, transcribed = _table_problems(supplement, prefix)
-        problems.extend(_supplement_text_problems(supplement, prefix))
-        problems.extend(figure_problems)
-        problems.extend(table_problems)
-        if present is not None:
-            problems.extend(_cross_check_exhibits(
-                labels, present, prefix, "supplements.json"))
-        if transcribed is not None:
-            problems.extend(_cross_check_tables(
-                labels, transcribed, prefix, "supplements.json"))
-    return problems
+# The key set of one exhibits entry: label and caption required, notes
+# optional (the exhibit's printed footnote text, non-empty when present),
+# nothing else accepted, on the same terms as the manifest's own key
+# contract.
+_EXHIBIT_KEYS = ("label", "caption")
+_EXHIBIT_OPTIONAL_KEYS = ("notes",)
+
+
+def _is_int(value) -> bool:
+    """True for a genuine JSON integer. Rejects bool (a Python int
+    subclass) so `schema_version: true` does not sneak through."""
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def _manifest_problems(root: Path):
@@ -500,27 +404,6 @@ def _exhibit_problems(value, where="manifest.json"):
     return problems, labels
 
 
-def _cross_check_exhibits(declared_labels, present_labels, prefix="",
-                          declared_in="manifest.json") -> list[str]:
-    """Bind a declaration to its figures/. Both directions are hard
-    errors; docs/bundle.md says why. `prefix` and `declared_in` name the
-    directory and the file that declares it, so a supplement's problems
-    say which supplement and point at supplements.json."""
-    problems: list[str] = []
-    declared = set(declared_labels)
-    present = set(present_labels)
-    for label in sorted(declared - present):
-        problems.append(
-            f"{declared_in} declares exhibit {label!r} but there is no "
-            f"{prefix}figures/{label}.png")
-    for label in sorted(present - declared):
-        problems.append(
-            f"{prefix}figures/{label}.png is not declared in "
-            f"{declared_in} 'exhibits'; every supplied image must be "
-            f"declared with its caption")
-    return problems
-
-
 def _text_problems(root: Path) -> list[str]:
     text_path = root / "text.md"
     if not text_path.exists():
@@ -562,6 +445,58 @@ def figure_files(root) -> dict[str, Path]:
         if child.suffix.lower() == ".png":
             found[child.stem] = child
     return {label: found[label] for label in sorted(found)}
+
+
+def _figure_problems(root: Path, prefix: str = ""):
+    """Return (problems, present_labels) for the figures/ directory.
+
+    `prefix` names where the directory sits when it is not the bundle's
+    own, so a supplement's problems read `supplements/{name}/figures/`
+    and point at the file an author has to open.
+
+    present_labels is the label of every crop figure_files finds, and None
+    when the directory itself is unusable (so the caller skips the
+    cross-checks). What is a crop is that function's answer, not a second
+    reading of the directory; what is left over is what is reported here.
+    """
+    figures_dir = root / "figures"
+    if not figures_dir.exists():
+        return [], []
+    if not figures_dir.is_dir():
+        return [f"{prefix}figures exists but is not a directory: "
+                f"{figures_dir}"], None
+    problems: list[str] = []
+    for child in sorted(figures_dir.iterdir()):
+        if child.name.startswith("."):
+            continue
+        if child.is_dir():
+            problems.append(f"{prefix}figures/ contains a subdirectory "
+                            f"(only .png files allowed): {child.name}")
+        elif child.suffix.lower() != ".png":
+            problems.append(f"{prefix}figures/ contains a non-png file "
+                            f"(only .png files allowed): {child.name}")
+    return problems, list(figure_files(root))
+
+
+def _cross_check_exhibits(declared_labels, present_labels, prefix="",
+                          declared_in="manifest.json") -> list[str]:
+    """Bind a declaration to its figures/. Both directions are hard
+    errors; docs/bundle.md says why. `prefix` and `declared_in` name the
+    directory and the file that declares it, so a supplement's problems
+    say which supplement and point at supplements.json."""
+    problems: list[str] = []
+    declared = set(declared_labels)
+    present = set(present_labels)
+    for label in sorted(declared - present):
+        problems.append(
+            f"{declared_in} declares exhibit {label!r} but there is no "
+            f"{prefix}figures/{label}.png")
+    for label in sorted(present - declared):
+        problems.append(
+            f"{prefix}figures/{label}.png is not declared in "
+            f"{declared_in} 'exhibits'; every supplied image must be "
+            f"declared with its caption")
+    return problems
 
 
 def table_files(root) -> dict[str, Path]:
@@ -650,6 +585,62 @@ def _cross_check_tables(declared_labels, transcribed_labels, prefix="",
         f"its label names which one"
         for label in sorted(set(transcribed_labels) - declared)
     ]
+
+
+# The elements a table transcription may use. The list is short on purpose:
+# it is everything needed to say what a printed table says, and nothing that
+# carries presentation, scripting or a second document inside the first.
+# `caption` is absent deliberately and reported by name below, because a
+# caption is carried by text.md and the manifest and a crop that bakes the
+# printed caption into the image invites an author to repeat it here.
+_TABLE_ELEMENTS = frozenset({
+    "table", "thead", "tbody", "tr", "th", "td",
+    "sup", "sub", "br", "em", "strong",
+})
+# Elements a table's cells may contain, and which may nest in each other.
+_INLINE_ELEMENTS = frozenset({"sup", "sub", "br", "em", "strong"})
+_CELL_ELEMENTS = frozenset({"th", "td"})
+_ROW_GROUPS = frozenset({"thead", "tbody"})
+# `br` is the only element written in the self-closing form; every other
+# element in the whitelist is opened and closed.
+_VOID_ELEMENTS = frozenset({"br"})
+# Elements named in a problem when they appear, rather than being reported
+# as merely unknown, because each is a thing an author plausibly reaches for
+# and the reason it is refused is not guessable from a whitelist.
+_TABLE_ELEMENT_NOTES = {
+    "caption": "the exhibit's caption is carried by text.md and the "
+               "manifest, never repeated here",
+    "tfoot": "the exhibit's printed footnote is the manifest's 'notes'; a "
+             "totals row is an ordinary row of tbody",
+    "colgroup": "column styling is presentation, and the transcription "
+                "carries content only",
+    "col": "column styling is presentation, and the transcription carries "
+           "content only",
+    "style": "a transcription carries no styling",
+    "script": "a transcription carries no scripting",
+    "img": "a transcription carries no images; the crop is the image",
+    "a": "a link is presentation here; the printed characters are the "
+         "content",
+}
+# Attributes each element may carry. Everything else, `style` and `class`
+# included, is refused: they say how a table looks, and how it looks is what
+# the crop is for.
+_TABLE_ATTRIBUTES = {
+    "th": frozenset({"colspan", "rowspan", "scope"}),
+    "td": frozenset({"colspan", "rowspan"}),
+}
+# An upper bound on one span. No printed table spans a thousand columns, and
+# without a bound a malformed `rowspan="99999999"` would have the grid below
+# allocate until the process died. A bundle is input, so it gets a limit.
+_SPAN_LIMIT = 1000
+# And an upper bound on the grid those spans describe, which the span limit
+# alone does not give: twenty cells of `colspan="1000"` beside one
+# `rowspan="1000"` is a 26 KB file describing twenty million positions, and
+# walking them to report the holes is work a bundle should not be able to
+# ask for. Gate 1 runs this on every conversion and `render_table.py` runs
+# it before it draws, so the bound is what keeps both cheap. No printed
+# exhibit comes near it.
+_GRID_LIMIT = 100_000
 
 
 def table_html_problems(source: str, where: str) -> list[str]:
@@ -1029,6 +1020,16 @@ class _TableHTMLParser(HTMLParser):
         return problems
 
 
+# supplements.json: the paper's identity, and the supplements it carries.
+# No schema_version of its own; one bundle declares one version, in the
+# manifest, and this file is part of that bundle rather than beside it.
+_SUPPLEMENTS_FIELDS = ("id", "supplements")
+# One supplement entry. `name` is the directory and the token a consumer
+# asks for; `title` is what the paper calls it, which is what a consumer
+# chooses by; `exhibits` is declared on exactly the manifest's terms.
+_SUPPLEMENT_KEYS = ("name", "title", "exhibits")
+
+
 def supplement_dirs(root) -> dict[str, Path]:
     """The supplements a bundle carries: name to path, ordered by name.
 
@@ -1131,17 +1132,6 @@ def _supplement_problems(root: Path, manifest_id):
     return problems, declared
 
 
-def _stray_supplement_files(root: Path) -> list[str]:
-    """Anything under supplements/ that is not a supplement."""
-    supplements_dir = root / "supplements"
-    if not supplements_dir.is_dir():
-        return []
-    return [f"supplements/ contains a file (each supplement is a "
-            f"directory): {child.name}"
-            for child in sorted(supplements_dir.iterdir())
-            if not child.name.startswith(".") and not child.is_dir()]
-
-
 def _supplement_entry_problems(value):
     """Return (problems, declared) for the declaration's supplements list.
 
@@ -1222,6 +1212,71 @@ def _supplement_entry_problems(value):
     return problems, (None if malformed else declared)
 
 
+def _stray_supplement_files(root: Path) -> list[str]:
+    """Anything under supplements/ that is not a supplement."""
+    supplements_dir = root / "supplements"
+    if not supplements_dir.is_dir():
+        return []
+    return [f"supplements/ contains a file (each supplement is a "
+            f"directory): {child.name}"
+            for child in sorted(supplements_dir.iterdir())
+            if not child.name.startswith(".") and not child.is_dir()]
+
+
+def _supplement_contents_problems(root: Path, supplements) -> list[str]:
+    """Each declared supplement's own text, figures and tables.
+
+    A supplement directory is shaped like the bundle it sits in, so the
+    same checks run over it with only a prefix changed: what is a crop,
+    what is a transcription, and what binds them to a declaration are
+    rules of the format, and a supplement does not get its own version of
+    any of them. Only the declaring file differs, which is why the
+    problems say supplements.json rather than manifest.json.
+    """
+    problems: list[str] = []
+    present = supplement_dirs(root)
+    for name in sorted(supplements):
+        if name not in present:
+            continue  # already reported as declared with no directory, and
+            # walking it would report every one of its exhibits again
+        labels = supplements[name]
+        supplement = root / "supplements" / name
+        prefix = f"supplements/{name}/"
+        figure_problems, present = _figure_problems(supplement, prefix)
+        table_problems, transcribed = _table_problems(supplement, prefix)
+        problems.extend(_supplement_text_problems(supplement, prefix))
+        problems.extend(figure_problems)
+        problems.extend(table_problems)
+        if present is not None:
+            problems.extend(_cross_check_exhibits(
+                labels, present, prefix, "supplements.json"))
+        if transcribed is not None:
+            problems.extend(_cross_check_tables(
+                labels, transcribed, prefix, "supplements.json"))
+    return problems
+
+
+def _supplement_text_problems(root: Path, prefix: str) -> list[str]:
+    """A supplement's text.md, which unlike the article's is optional.
+
+    A supplement that is nothing but data tables prints no prose, and
+    inventing a text.md for it would mean inventing the prose. When one is
+    there it is held to what the article's is held to: UTF-8 and not
+    empty.
+    """
+    text_path = root / "text.md"
+    if not text_path.exists():
+        return []
+    try:
+        text = text_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return [f"{prefix}text.md could not be read as UTF-8: {exc}"]
+    if not text.strip():
+        return [f"{prefix}text.md is empty; a supplement with no prose "
+                f"omits the file rather than supplying an empty one"]
+    return []
+
+
 def _cross_check_label_uniqueness(article_labels, supplements) -> list[str]:
     """One label, one exhibit, across the whole bundle.
 
@@ -1247,55 +1302,3 @@ def _cross_check_label_uniqueness(article_labels, supplements) -> list[str]:
                 continue
             seen[label] = f"supplement {name!r}"
     return problems
-
-
-def _supplement_text_problems(root: Path, prefix: str) -> list[str]:
-    """A supplement's text.md, which unlike the article's is optional.
-
-    A supplement that is nothing but data tables prints no prose, and
-    inventing a text.md for it would mean inventing the prose. When one is
-    there it is held to what the article's is held to: UTF-8 and not
-    empty.
-    """
-    text_path = root / "text.md"
-    if not text_path.exists():
-        return []
-    try:
-        text = text_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        return [f"{prefix}text.md could not be read as UTF-8: {exc}"]
-    if not text.strip():
-        return [f"{prefix}text.md is empty; a supplement with no prose "
-                f"omits the file rather than supplying an empty one"]
-    return []
-
-
-def _figure_problems(root: Path, prefix: str = ""):
-    """Return (problems, present_labels) for the figures/ directory.
-
-    `prefix` names where the directory sits when it is not the bundle's
-    own, so a supplement's problems read `supplements/{name}/figures/`
-    and point at the file an author has to open.
-
-    present_labels is the label of every crop figure_files finds, and None
-    when the directory itself is unusable (so the caller skips the
-    cross-checks). What is a crop is that function's answer, not a second
-    reading of the directory; what is left over is what is reported here.
-    """
-    figures_dir = root / "figures"
-    if not figures_dir.exists():
-        return [], []
-    if not figures_dir.is_dir():
-        return [f"{prefix}figures exists but is not a directory: "
-                f"{figures_dir}"], None
-    problems: list[str] = []
-    for child in sorted(figures_dir.iterdir()):
-        if child.name.startswith("."):
-            continue
-        if child.is_dir():
-            problems.append(f"{prefix}figures/ contains a subdirectory "
-                            f"(only .png files allowed): {child.name}")
-        elif child.suffix.lower() != ".png":
-            problems.append(f"{prefix}figures/ contains a non-png file "
-                            f"(only .png files allowed): {child.name}")
-    return problems, list(figure_files(root))

@@ -14,10 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from alteksto.bundle import (SCHEMA_VERSION, _name_problem, _walk_objects,
-                             figure_files, is_filename_safe, supplement_dirs,
-                             table_files, validate_bundle,
-                             validate_table_html)
+from alteksto.bundle import (SCHEMA_VERSION, _walk_objects, figure_files,
+                             name_problem, supplement_dirs, table_files,
+                             validate_bundle, validate_table_html)
 from tests.support import REPO_ROOT, load_script
 
 
@@ -206,41 +205,53 @@ def test_an_exhibit_label_of_punctuation_alone_is_rejected(tmp_path):
     assert any("at least one letter or digit" in p for p in problems), problems
 
 
-@pytest.mark.parametrize("value", [
-    "table_01", "demo.001", "a-b", "_x1", "1234",
-    ".", "..", "-", "___", "has space", "a/b", "fig\n01", "",
+@pytest.mark.parametrize("value, legal", [
+    ("table_01", True), ("demo.001", True), ("a-b", True), ("_x1", True),
+    ("1234", True),
+    (".", False), ("..", False), ("-", False), ("___", False),
+    ("has space", False), ("a/b", False), ("fig_01\n", False),
+    ("", False), (7, False),
 ])
-def test_the_two_shapes_of_the_name_rule_agree(value):
-    """One rule asked twice: as a boolean before, as a problem after.
+def test_the_name_rule_answers_for_every_shape_of_name(value, legal):
+    """Both halves and both sides of each, on one call.
 
-    `is_filename_safe` is what the producing side asks before it stages a
-    name and `_name_problem` is what the validator reports afterwards, so
-    a name one accepts and the other refuses is a conversion that passes
-    staging and fails gate 1. They are two functions because only the
-    second has to say which half failed, and this is what holds them to
-    one answer.
+    `name_problem` is what the producing side asks before it stages a
+    name and what the validator reports afterwards, so these are the
+    same answers in both places by construction rather than by two
+    functions agreeing.
     """
-    problem = _name_problem(value, "name", "where", "because")
-    assert is_filename_safe(value) == (problem is None), (value, problem)
+    assert (name_problem(value) is None) is legal, name_problem(value)
 
 
-def test_only_the_two_askers_reach_for_the_name_patterns():
-    """One rule in one place, and this is what keeps it there.
+def test_the_name_rule_is_written_in_exactly_one_place():
+    """Not the predicate: the pattern and the words it is reported in.
 
-    The gap this closed existed because three sites each matched the
-    patterns themselves and one of them matched only half of the rule. A
-    fourth name will arrive eventually; when it does it has to come
-    through `is_filename_safe` or `_name_problem` rather than reaching
-    for the regexes, and structure says so here rather than a reviewer
-    having to notice.
+    The gap this closed existed because three sites in the validator
+    each matched the pattern themselves and one matched only half of it,
+    and a fourth copy sat in engines/walk/tools/stage.py, under a
+    docstring promising the rule was imported rather than restated. So
+    the check is on the character class itself, wherever it appears in
+    Python this repository ships: one function holds it, and a fifth
+    copy fails here rather than being noticed by a reviewer.
+
+    docs/bundle.md states it too, and must: it is the specification, and
+    this module is only its enforcement.
     """
-    tree = ast.parse((REPO_ROOT / "src" / "alteksto" / "bundle.py").read_text())
-    patterns = {"_NAME_PATTERN", "_NAME_ALNUM"}
-    users = {node.name for node in ast.walk(tree)
-             if isinstance(node, ast.FunctionDef)
-             and any(isinstance(inner, ast.Name) and inner.id in patterns
-                     for inner in ast.walk(node))}
-    assert users == {"is_filename_safe", "_name_problem"}, users
+    module = REPO_ROOT / "src" / "alteksto" / "bundle.py"
+    tree = ast.parse(module.read_text(encoding="utf-8"))
+    holders = {node.name for node in ast.walk(tree)
+               if isinstance(node, ast.FunctionDef)
+               and any(isinstance(inner, ast.Constant)
+                       and isinstance(inner.value, str)
+                       and "A-Za-z0-9" in inner.value
+                       for inner in ast.walk(node))}
+    assert holders == {"name_problem"}, holders
+
+    shipped = [path for root in ("src", "engines", "tools")
+               for path in sorted((REPO_ROOT / root).rglob("*.py"))]
+    restating = [path.relative_to(REPO_ROOT) for path in shipped
+                 if "A-Za-z0-9" in path.read_text(encoding="utf-8")]
+    assert restating == [module.relative_to(REPO_ROOT)], restating
 
 
 def test_a_dotted_id_with_an_alphanumeric_is_allowed(tmp_path):

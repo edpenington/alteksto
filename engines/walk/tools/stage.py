@@ -51,7 +51,7 @@ from pathlib import Path
 
 import pymupdf
 
-from alteksto.bundle import is_filename_safe
+from alteksto.bundle import name_problem
 
 # Front matter: where a paper states its own identity, before the
 # reference list starts describing everybody else's.
@@ -166,16 +166,16 @@ def check_supplement_name(name: str) -> str:
     the playbook prefixes every one of the supplement's exhibit labels
     with it. So a name the format refuses yields a whole set of labels it
     also refuses, and the run finds that out at gate 1, after the
-    conversion. The rule is imported rather than restated, so the two
-    cannot drift.
+    conversion. The rule is imported and so are its words: what an author
+    is told here is what the validator would have told them later.
     """
     value = check_id(name, what="supplement name")
-    if not is_filename_safe(value):
-        raise ValueError(
-            f"supplement name {value!r} must match ^[A-Za-z0-9._-]+$ with "
-            f"at least one letter or digit; it names a directory in the "
-            f"bundle too, and every one of the supplement's exhibit labels "
-            f"is prefixed with it")
+    problem = name_problem(
+        value, "supplement name",
+        because="it names a directory in the bundle too, and every one of "
+                "the supplement's exhibit labels is prefixed with it")
+    if problem:
+        raise ValueError(problem)
     return value
 
 

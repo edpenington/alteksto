@@ -2,7 +2,7 @@
 
 This repository owns the bundle format; the specification lives in
 docs/bundle.md and this module is its enforcement. Consumers of the
-format (*meltiro* first among them) accept what passes here.
+format (e.g. *meltiro*, *forfiltri*) accept what passes here.
 
 `validate_bundle(path)` returns EVERY problem as a list of strings; an
 empty list means the bundle is valid. Nothing is raised for a malformed
@@ -17,6 +17,9 @@ crop, and `validate_table_html(source, where)` is what one of those files
 has to be. That last one is public because the producing side needs it
 too: a tool that renders a transcription refuses the same files this
 refuses, rather than forming its own opinion of what a table is.
+`name_problem(value, ...)` is public for the same reason: a tool staging
+a name refuses it in the format's own words, before a conversion runs on
+it rather than at gate 1 after.
 
 All of them work on the standard library alone, the table transcriptions
 included: their structure is checked with `html.parser`, so enforcing the
@@ -33,24 +36,6 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 SCHEMA_VERSION = 4
-
-# The id, an exhibit label and a supplement name each become a directory
-# or a file stem inside the bundle, so one rule covers all three:
-# filename-safe characters, at least one of them alphanumeric.
-# `is_filename_safe` below is that rule as a single call, which is what
-# the producing side checks a name with before a conversion runs on it.
-#
-# `\Z`, not `$`: Python's `$` also matches before a trailing newline, so
-# `$` would accept "fig_01\n".
-_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]+\Z")
-# An all-punctuation name is a path-traversal hazard: "." and ".." resolve
-# to real directories.
-_NAME_ALNUM = re.compile(r"[A-Za-z0-9]")
-# The first half of the rule as its three problems say it, written once so
-# they cannot drift apart. `$` here, not `\Z`: it is the form a reader
-# knows, and the words beside it already exclude a trailing newline.
-_NAME_RULE = ("must match ^[A-Za-z0-9._-]+$ (letters, digits, dot, "
-              "underscore, dash only)")
 
 # The elements a table transcription may use. The list is short on purpose:
 # it is everything needed to say what a printed table says, and nothing that
@@ -139,39 +124,48 @@ _EXHIBIT_KEYS = ("label", "caption")
 _EXHIBIT_OPTIONAL_KEYS = ("notes",)
 
 
-def is_filename_safe(value) -> bool:
-    """True when a value may name a directory or a file stem in a bundle.
+def name_problem(value, what="name", where="", because=None):
+    r"""Why a name may not become a path in a bundle, or None if it may.
 
-    The rule the id, an exhibit label and a supplement name all obey, in
-    one place so that the producing side can refuse a name before a
-    conversion runs on it rather than after. Staging under a name this
-    rejects means the whole run happens and gate 1 is what finally says
-    so, which is the expensive way to learn it.
+    The id, an exhibit label and a supplement name each become a
+    directory or a file stem, so all three come here, and so does the
+    producing side before it stages a name: refusing at gate 1 what
+    could have been refused at staging means the whole conversion runs
+    first, which is the expensive way to learn it.
+
+    The whole rule is in this one function, the characters allowed, the
+    requirement that at least one be alphanumeric, and the words each
+    half is reported in, so that nothing anywhere holds a piece of it to
+    drift from. That is not hypothetical twice over: an exhibit label
+    went without the second half from the first commit until it was
+    noticed, and the tool that stages a supplement wrote its own wording
+    of the rule under a docstring promising it had not.
+
+    `what` and `where` locate the name for its reader, and `because`
+    says what this particular name is for.
+
+    `\Z`, not `$`: Python's `$` also matches immediately before a
+    trailing newline, so `$` would accept "fig_01\n". The problem says
+    `$` anyway, that being the form a reader knows, and the words beside
+    it already exclude a newline.
     """
-    return bool(isinstance(value, str) and _NAME_PATTERN.match(value)
-                and _NAME_ALNUM.search(value))
-
-
-def _name_problem(value, what, where, because):
-    """The rule `is_filename_safe` asks as a boolean, asked as a problem.
-
-    Every name that becomes a path comes here, so that a name cannot be
-    given half the rule by the site that checks it. That is not
-    hypothetical: an exhibit label went without the second half from the
-    first commit until it was noticed, because each of the three sites
-    spelled the rule out for itself.
-
-    `what` and `where` locate the name for its reader, and `because` says
-    what this particular name is for, so a producer reading the problem
-    knows why the rule is there. None when the name is legal.
-    """
-    if not _NAME_PATTERN.match(value):
-        return f"{where} {what} {value!r} {_NAME_RULE}: {because}"
-    if not _NAME_ALNUM.search(value):
-        return (f"{where} {what} {value!r} must contain at least one letter "
-                f"or digit: punctuation alone is not a name, and '.' and "
-                f"'..' resolve to real directories")
-    return None
+    head = " ".join(part for part in (where, what) if part)
+    if not isinstance(value, str):
+        return f"{head} must be a string, got {type(value).__name__}"
+    if not re.match(r"^[A-Za-z0-9._-]+\Z", value):
+        problem = (f"{head} {value!r} must match ^[A-Za-z0-9._-]+$ "
+                   f"(letters, digits, dot, underscore, dash only)")
+    elif not re.search(r"[A-Za-z0-9]", value):
+        problem = (f"{head} {value!r} must contain at least one letter or "
+                   f"digit")
+        # One tail, not two. A caller that says what its name is for says
+        # it better than this does, so this is only what is left when no
+        # caller has.
+        because = because or ("punctuation alone is not a name, and '.' "
+                              "and '..' resolve to real directories")
+    else:
+        return None
+    return f"{problem}: {because}" if because else problem
 
 
 def _is_int(value) -> bool:
@@ -320,7 +314,7 @@ def _validate_manifest(root: Path):
                 problems.append(f"manifest.json key {name!r} must be a "
                                 f"non-empty string")
             if name == "id" and value.strip():
-                problem = _name_problem(
+                problem = name_problem(
                     value, "id", "manifest.json",
                     "it is used directly as a filesystem path component")
                 if problem:
@@ -488,7 +482,7 @@ def _validate_exhibits(value, where="manifest.json"):
         label = entry.get("label")
         if not isinstance(label, str) or not label.strip():
             continue
-        problem = _name_problem(
+        problem = name_problem(
             label, "label", where,
             "it is the stem of a figures/*.png file and the token "
             "consumers cite")
@@ -1205,7 +1199,7 @@ def _validate_supplement_entries(value, problems):
         # supplement would send every check below to the bundle root, where
         # it reads the article's own figures and reports them as this
         # supplement's undeclared files.
-        problem = _name_problem(
+        problem = name_problem(
             name, "name", where,
             "it names a supplements/ directory and is the token a consumer "
             "asks for a supplement by")

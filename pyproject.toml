@@ -5,37 +5,44 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "alteksto"
 dynamic = ["version"]
-description = "Shared code for turning a paper PDF into a clean paper bundle (markdown full text, cropped figures, manifest)."
+description = "The paper bundle format: markdown full text, cropped figures, manifest. Reads and validates bundles."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Ed Penington" }]
-# Nothing. The format contract (`alteksto.bundle`, which enforces
-# docs/bundle.md) imports the standard library and nothing else, and a
-# consumer that only reads and checks bundles is entitled to an install that
-# weighs what the contract weighs. The page stack sits behind the `tools`
-# extra below.
+# Nothing. This package is the format contract (`alteksto.bundle`, which
+# enforces docs/bundle.md) and imports the standard library and nothing else,
+# and a consumer that only reads and checks bundles is entitled to an install
+# that weighs what the contract weighs. Everything that produces a bundle
+# lives in `engines/`, outside this package, behind the extras below.
 dependencies = []
 
-# No [project.scripts]: the package holds only what the tools share, and the
-# tools are run as scripts, not entry points.
+# No [project.scripts]: the package holds the format and nothing else, and
+# validate_bundle.py is run as a script, not an entry point.
 
 [project.optional-dependencies]
-# What the page tools need to open a PDF and read a page: `alteksto.workdir`
-# and everything under tools/ that renders, crops or parses. `pip install
-# alteksto[tools]` is the producing side of the format; a plain install is the
-# consuming side.
+# One extra per engine, because an engine declares what it needs and the
+# engines share nothing with each other but the contract. `pip install
+# alteksto[walk]` is the producing side of the format; a plain install is the
+# consuming side. A second engine adds its own extra beside this one, and
+# never edits this one.
+# What walk needs to open a PDF and read a page.
 # 1.24.3 first ships the pymupdf module name; before it, only fitz.
-tools = ["pymupdf>=1.24.3", "lxml>=5.0"]
-# The suite exercises the tools, so it needs what they need. Self-referential
-# so the floors are declared once, above, and cannot drift from the extra the
-# tools are actually installed with.
-dev = ["alteksto[tools]", "pytest>=8.0"]
+walk = ["pymupdf>=1.24.3", "lxml>=5.0"]
+# The suite exercises every engine, so it needs what they all need. Self-
+# referential so the floors are declared once, above, and cannot drift from
+# the extras the engines are actually installed with. A new engine's extra
+# joins this list.
+dev = ["alteksto[walk]", "pytest>=8.0"]
 
 [tool.setuptools.dynamic]
 version = { attr = "alteksto.__version__" }
 
+# src/ holds the contract and nothing else, so the wheel is the contract and
+# nothing else. The engines are checkout code and are never packaged: they
+# run as scripts from the repository, and nobody installs an engine to read
+# a bundle.
 [tool.setuptools.packages.find]
 where = ["src"]
 
@@ -47,7 +54,10 @@ alteksto = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+# src/ for the contract, the repository root so `engines.*` and `tests.*`
+# resolve. The suite is a package: without that, two engines could not both
+# have a test file called test_crop.py.
+pythonpath = ["src", "."]
 # -rs prints every skip with its reason. Without it a skipped test is a bare
 # dot in the output, indistinguishable from a pass. A skip must look like a
 # skip.

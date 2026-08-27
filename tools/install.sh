@@ -7,9 +7,9 @@
 # papers and ids and calls out to alteksto, whose sessions cannot see
 # anything that lives here.
 #
-# It builds the virtual environment, then registers the skill and the
-# two agent types under ~/.claude. The registrations are symlinks, so
-# pulling this repository updates them; the checkout's location is
+# It builds the virtual environment, then registers the skill and each
+# engine's agent types under ~/.claude. The registrations are symlinks,
+# so pulling this repository updates them; the checkout's location is
 # passed separately, as ALTEKSTO_HOME in ~/.claude/settings.json, which
 # is what lets the linked files stay free of any path from any one
 # machine.
@@ -55,12 +55,15 @@ run() {
 
 say "checkout at ${ROOT}"
 
+# An engine's agents carry its name, because asking for a conversion
+# means asking a particular engine for one. A second engine adds its own
+# pair here; nothing else in this script knows how many there are.
 LINK_PATHS=("${CLAUDE_DIR}/skills/alteksto"
-            "${CLAUDE_DIR}/agents/prepare-paper.md"
-            "${CLAUDE_DIR}/agents/sweep-paper.md")
+            "${CLAUDE_DIR}/agents/prepare-paper-walk.md"
+            "${CLAUDE_DIR}/agents/sweep-paper-walk.md")
 LINK_TARGETS=("${ROOT}/.claude/skills/alteksto"
-              "${ROOT}/.claude/agents/prepare-paper.md"
-              "${ROOT}/.claude/agents/sweep-paper.md")
+              "${ROOT}/engines/walk/agents/prepare-paper.md"
+              "${ROOT}/engines/walk/agents/sweep-paper.md")
 
 # Removal takes back exactly what this checkout registered. A link
 # pointing at some other checkout belongs to that one, a real file
@@ -123,9 +126,9 @@ PY
     exit 0
 fi
 
-# The virtual environment. Producing a bundle needs the page stack, which
-# is the [tools] extra that [dev] already pulls in. --links-only skips
-# this for an environment somebody else manages.
+# The virtual environment. Producing a bundle needs an engine's page
+# stack, which is the extra that [dev] already pulls in for every engine.
+# --links-only skips this for an environment somebody else manages.
 if [ "$LINKS_ONLY" = 1 ]; then
     say "skipping venv (--links-only)"
 elif [ -x "${ROOT}/.venv/bin/python" ]; then
@@ -219,8 +222,9 @@ fi
 # use.
 if [ "$DRY_RUN" = 0 ]; then
     broken=0
-    for path in "${CLAUDE_DIR}/skills/alteksto/SKILL.md" \
-                "${LINK_PATHS[1]}" "${LINK_PATHS[2]}"; do
+    checks=("${CLAUDE_DIR}/skills/alteksto/SKILL.md"
+            "${LINK_PATHS[@]:1}")
+    for path in "${checks[@]}"; do
         [ -e "${path}" ] || { say "BROKEN: ${path} resolves to nothing"; \
                               broken=1; }
     done
@@ -229,7 +233,7 @@ if [ "$DRY_RUN" = 0 ]; then
         say "alteksto skill and say nothing about it"
         exit 1
     fi
-    say "all three registrations resolve"
+    say "all ${#checks[@]} registrations resolve"
 fi
 
 say "done. In a new session, from any repository, say:"

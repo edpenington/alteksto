@@ -764,7 +764,7 @@ def main(argv=None) -> int:
     path = build(args.out_dir)
     print(f"build-pdf: {PAGE_COUNT} pages -> {path}", file=sys.stderr)
     if args.supplement:
-        # Where tools/stage.py --supplement would have put it, so the work
+        # Where a staging tool's --supplement would have put it, so the work
         # directory looks like one a caller staged rather than one this
         # script invented a shape for.
         supplement = build_supplement(

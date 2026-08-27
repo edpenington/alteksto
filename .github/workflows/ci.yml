@@ -33,8 +33,8 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
-      # `[dev]` pulls the `tools` extra, because the suite exercises the page
-      # tools and its conftest opens a PDF to build the invented fixtures.
+      # `[dev]` pulls every engine's extra, because the suite exercises the
+      # engines and their fixtures open a PDF to build the invented papers.
       - name: Install
         run: pip install -e ".[dev]"
 
@@ -47,9 +47,10 @@ jobs:
   contract-is-installable-alone:
     # The promise a downstream consumer depends on: `alteksto.bundle`, which
     # is the whole format contract, works on a plain install with no
-    # third-party package present. The suite's own guard reads that off the
-    # files; this proves it against a real environment, where the page stack
-    # genuinely is not installed.
+    # third-party package present. The engines are what need the page stack,
+    # and they live outside the package precisely so this holds. The suite's
+    # own guard reads that off the files; this proves it against a real
+    # environment, where the page stack genuinely is not installed.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

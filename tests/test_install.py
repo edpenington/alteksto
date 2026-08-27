@@ -17,7 +17,8 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INSTALL = REPO_ROOT / "tools" / "install.sh"
 
-LINKS = ("skills/alteksto", "agents/prepare-paper.md", "agents/sweep-paper.md")
+LINKS = ("skills/alteksto", "agents/prepare-paper-walk.md",
+         "agents/sweep-paper-walk.md")
 
 
 def install(home, *args):
@@ -91,13 +92,13 @@ def test_a_settings_file_that_is_not_json_stops_the_install(tmp_path):
 def test_a_real_file_in_the_way_is_never_removed(tmp_path):
     agents = tmp_path / ".claude" / "agents"
     agents.mkdir(parents=True)
-    (agents / "prepare-paper.md").write_text("mine", encoding="utf-8")
+    (agents / "prepare-paper-walk.md").write_text("mine", encoding="utf-8")
 
     result = install(tmp_path)
 
     assert result.returncode != 0
     assert "REFUSING" in result.stdout
-    assert (agents / "prepare-paper.md").read_text() == "mine"
+    assert (agents / "prepare-paper-walk.md").read_text() == "mine"
 
 
 def test_a_stale_link_is_repointed(tmp_path):
@@ -144,14 +145,15 @@ def test_uninstall_leaves_another_checkouts_registration(tmp_path):
     (claude / "skills").mkdir()
     elsewhere = tmp_path / "other-checkout"
     elsewhere.mkdir()
-    (claude / "agents" / "prepare-paper.md").symlink_to(elsewhere / "a.md")
+    (claude / "agents" / "prepare-paper-walk.md").symlink_to(
+        elsewhere / "a.md")
     (claude / "settings.json").write_text(json.dumps(
         {"env": {"ALTEKSTO_HOME": str(elsewhere)}}), encoding="utf-8")
 
     result = install(tmp_path, "--uninstall")
 
     assert result.returncode == 0, result.stderr
-    assert (claude / "agents" / "prepare-paper.md").is_symlink()
+    assert (claude / "agents" / "prepare-paper-walk.md").is_symlink()
     assert settings_of(tmp_path)["env"]["ALTEKSTO_HOME"] == str(elsewhere)
     assert "points elsewhere" in result.stdout
 
@@ -219,11 +221,12 @@ def test_a_dangling_registration_fails_loudly(tmp_path):
     """A link into a checkout without these files must not pass silently."""
     fake_root = tmp_path / "checkout"
     shutil.copytree(REPO_ROOT / "tools", fake_root / "tools")
-    (fake_root / ".claude" / "agents").mkdir(parents=True)
+    agents = fake_root / "engines" / "walk" / "agents"
+    agents.mkdir(parents=True)
     # The skill directory is missing, exactly as it is on a revision
     # predating it.
     for name in ("prepare-paper.md", "sweep-paper.md"):
-        (fake_root / ".claude" / "agents" / name).write_text("x")
+        (agents / name).write_text("x")
 
     result = subprocess.run(
         ["bash", str(fake_root / "tools" / "install.sh"), "--links-only"],

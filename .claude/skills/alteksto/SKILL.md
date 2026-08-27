@@ -7,11 +7,24 @@ description: Convert paper PDFs into paper bundles (markdown full text, cropped 
 
 You are the caller, not the converter. Your job is to get each paper its
 own agent and to report what came back. You do not read page renders,
-you do not walk the text, and you do not open `playbook/`, which is the
-converter's manual and turns whoever reads it into a converter.
+you do not walk the text, and you do not open an engine's playbook,
+which is the converter's manual and turns whoever reads it into a
+converter.
 
 Converting one paper fills a context. Spend yours on a paper and the
 rest of the papers have no orchestrator left.
+
+## 0. Pick the engine
+
+alteksto keeps more than one way of converting a paper, one directory
+per engine under `engines/`. They differ in how they work and are
+compared by what they emit. Unless the user named one, use walk, the
+engine this repository shipped with: its converter is
+`prepare-paper-walk` and its tools are under `engines/walk/tools/`.
+Every step below is otherwise the same whichever engine you call.
+
+Say which engine you used when you report, because a bundle is only
+comparable against another if both are named.
 
 ## 1. Find the checkout
 
@@ -19,7 +32,7 @@ The conversion runs inside the alteksto checkout, in three likely
 states:
 
 - **You are already in it**, if the working directory holds
-  `playbook/00-route.md`. Nothing to find.
+  `engines/walk/playbook/00-route.md`. Nothing to find.
 - **`ALTEKSTO_HOME` is set**, which is what `tools/install.sh` records.
   Use it.
 - **Neither**, so it is not on this machine. Clone
@@ -55,13 +68,15 @@ later stage can detect, because every stage after intake trusts the id.
 
 With a registry, let the tool match files to records:
 
-    .venv/bin/python tools/stage.py --from <staging dir> \
+    .venv/bin/python engines/walk/tools/stage.py --from <staging dir> \
         --registry <registry.json> [--records <key>] --work work
 
 With ids already in hand, say so directly:
 
-    .venv/bin/python tools/stage.py --id <id> --pdf <path> --work work
-    .venv/bin/python tools/stage.py --map-file <id-to-path.json> --work work
+    .venv/bin/python engines/walk/tools/stage.py --id <id> \
+        --pdf <path> --work work
+    .venv/bin/python engines/walk/tools/stage.py \
+        --map-file <id-to-path.json> --work work
 
 Read the exit code. `0` means every PDF is staged. `3` means some were
 ambiguous and staged nothing: those are listed on stderr with their
@@ -73,9 +88,9 @@ list is what you spawn from.
 
 ## 4. Spawn one converter per paper
 
-One agent of type `prepare-paper` per staged id, in waves of about four,
-because each converter renders pages, calls OCR, and views crops. Give
-each one exactly this, filled in:
+One converter per staged id, of the engine you picked in step 0, in
+waves of about four, because each converter renders pages, calls OCR,
+and views crops. Give each one exactly this, filled in:
 
     Convert paper {id}. Your working directory is {checkout}; every path
     in the playbook is relative to it. The PDF is at

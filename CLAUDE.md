@@ -45,8 +45,11 @@ Start at `docs/calling.md` instead to have papers converted: one
 - A new engine is a new directory under `engines/`, with its own
   playbook, tools, lib, agents and extra in pyproject, its own tests
   under `tests/engines/{name}/`, and its agents named for it. It copies
-  what it needs from another engine rather than importing it. Nothing
-  outside `engines/` learns its name except `install.sh` and the skill.
+  what it needs from another engine rather than importing it. Only its
+  own code and its own tests import from it. Elsewhere its name appears
+  just where something has to name a default: `pyproject.toml`,
+  `tools/install.sh`, the skill, and the docs telling a caller which
+  converter to spawn.
 - `src/alteksto` holds the format and nothing else. Anything a producer
   needs belongs to an engine. A test reads this off the files, and CI
   proves it against a wheel installed with no page stack present.

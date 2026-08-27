@@ -17,9 +17,12 @@ and catalogues the defects real conversions produce. The scripts in
 
     playbook/     the prompts: the route, one file per stage, and quality.md
     tools/        the thin scripts the prompts call
-    lib/          what those scripts share: the work directory, page markers
-    agents/       prepare-paper-walk and sweep-paper-walk
-    example/      what this engine expects to produce from examples/
+    lib/          what those scripts share: the work directory and its page
+                  markers, and reading a key from the environment
+    agents/       the converter and the sweep, each named for this engine:
+                  prepare-paper-walk and sweep-paper-walk
+    example/      the intermediates this engine should arrive at on the
+                  worked example in examples/
 
 ## What it depends on
 

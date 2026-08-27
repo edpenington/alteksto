@@ -9,8 +9,9 @@ is where crop quality is decided.
 ## Proposals
 
 - **Figures start from images.json.** The OCR's bboxes found every real
-  figure in measurement, and their crops excluded captions correctly.
-  But treat them as proposals, not answers:
+  figure in measurement, but they bound the artwork alone and the
+  caption is part of the crop, so every one of them needs extending.
+  Treat them as proposals, not answers:
   - Rescale first. Coordinates are in the page space images.json itself
     declares per page (its dimensions vary paper to paper and page to
     page, and never match the render DPI). Hand that page's declared
@@ -59,8 +60,14 @@ For each exhibit:
    measurement every table box drawn from the content down clipped it
    by a couple of pixels, so check the top rule is inside. A figure's
    own printed title above the plot area is part of the figure the
-   same way. Is the caption outside (it lives in text.md)? Is anything
-   foreign inside (neighbouring text, the next exhibit)? For edges too
+   same way. Is the caption inside, and inside whole? The caption is
+   part of the exhibit and belongs in the crop, above a table or below
+   a figure as the journal prints it, and a crop that clips it at
+   either end is wrong: a caption sliced down its left edge reads as
+   a fragment and is worse than one left out. It is carried as text as
+   well, in the sentinel and the manifest, so a consumer never has to
+   read it off the pixels. Is anything foreign inside (neighbouring
+   text, the next exhibit)? For edges too
    fine to trust by eye, a row and column ink profile of the render
    settles where content starts and stops.
 3. Adjust the region and re-crop until both answers are right. A crop
@@ -97,11 +104,12 @@ because each is a defect that reads perfectly plausibly:
 - **An empty cell stays an empty cell.** `<td></td>`, never a dash
   invented to fill it and never omitted, because omitting it slides
   every value after it one column left.
-- **The caption is not a row.** Journals commonly print the caption
-  directly above the top rule, so it is often inside the crop; it
-  belongs to text.md and the manifest and appears here neither as a
-  row nor as a heading. The footnote lines under the table are inside
-  the crop too, and they are the manifest's `notes`.
+- **The caption is not a row.** The caption is inside the crop by
+  rule, and often printed inside the table's own frame; in the
+  transcription it appears neither as a row nor as a heading, because
+  it is already carried as text in the sentinel and the manifest. The
+  footnote lines under the table are inside the crop too, and they are
+  the manifest's `notes`.
 - **A footnote marker stays a marker.** A superscript on a count is
   `<sup>a</sup>`, not a digit fused onto the number.
 

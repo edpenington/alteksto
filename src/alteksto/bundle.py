@@ -35,7 +35,7 @@ import re
 from html.parser import HTMLParser
 from pathlib import Path
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # The elements a table transcription may use. The list is short on purpose:
 # it is everything needed to say what a printed table says, and nothing that

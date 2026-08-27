@@ -6,4 +6,4 @@ the contract weighs. The code that produces bundles lives in `engines/`,
 outside this package, and depends on it rather than the other way round.
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"

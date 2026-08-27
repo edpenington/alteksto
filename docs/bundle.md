@@ -4,15 +4,20 @@ This repository owns the paper bundle format. The specification below
 is normative: `tools/validate_bundle.py` enforces it, the playbook
 produces to it, and downstream consumers (*meltiro* first among them)
 read it. The format evolves here, by a `schema_version` bump, and
-consumers follow. A rule that tightens what was always malformed, and
-so refuses nothing a correct bundle contains, does not move the
-version: no bundle that was right becomes wrong.
+consumers follow. The number moves for any change to what counts as a
+bundle: what one may carry, and what fits through the hole. A rule that
+tightens only what was always malformed moves it too, even where no
+bundle that was right becomes wrong. Whether any real bundle changed
+status is a fact about somebody's corpus rather than about the format,
+and a consumer asking whether the rules have moved should not have to
+establish it first.
 
-The format is at `schema_version` 4. A bundle declares that version and
+The format is at `schema_version` 5. A bundle declares that version and
 a consumer accepts it; a bundle declaring any other version is not a
-bundle.
+bundle. A bundle stamped with an earlier version has not been checked
+against these rules, which is what the refusal says.
 
-Versions 3 and 4 are both additions and nothing else. Version 3 added
+Versions 3 and 4 are additions and nothing else. Version 3 added
 `tables/`, the optional table transcriptions described below; version 4
 added `supplements.json` and `supplements/`, the paper's supplementary
 material carried as its own thing. A correct version 2 bundle becomes a
@@ -21,6 +26,13 @@ either version adds is optional. Neither bump is about what a producer
 must now write. Both are about what a consumer may now rely on, which is
 that these directories have been checked rather than ignored as the
 paperwork any bundle is free to carry.
+
+Version 5 is the first that is not an addition. It holds an exhibit
+label to the whole of the id's rule, the pattern and at least one letter
+or digit both, where the validator had been applying only the pattern. A
+version 4 bundle becomes a version 5 bundle by changing the integer and
+validating again, and the second half is the point: what a tightening
+changes cannot be read off the integer alone.
 
 ## Layout
 
@@ -60,7 +72,7 @@ happened to come last.
 
 | key | required | rule |
 |---|---|---|
-| schema_version | yes | the integer 4; a JSON boolean is not an integer |
+| schema_version | yes | the integer 5; a JSON boolean is not an integer |
 | id | yes | non-empty string matching `^[A-Za-z0-9._-]+$` with at least one letter or digit |
 | title | yes | non-empty string, the title as printed |
 | exhibits | yes | list of exhibit entries; may be `[]` |

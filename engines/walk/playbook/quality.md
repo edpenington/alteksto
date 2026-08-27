@@ -15,7 +15,7 @@ what passes here. The load-bearing points:
 - `bundles/{id}/` holds `manifest.json`, `text.md`, `figures/*.png`,
   and optionally `tables/*.html`. Nothing else is read; extra files are
   ignored.
-- The manifest carries `schema_version` (4), `id`, `title`, `exhibits`,
+- The manifest carries `schema_version` (5), `id`, `title`, `exhibits`,
   and optionally `doi` and `summary`. Unknown keys are rejected. Each
   exhibit entry is `{"label", "caption"}` plus optional `notes` (the
   exhibit's printed footnote text); every declared label must have its

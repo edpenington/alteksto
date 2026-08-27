@@ -1,44 +1,15 @@
 # The paper bundle: format specification
 
 This repository owns the paper bundle format. The specification below
-is normative: `tools/validate_bundle.py` enforces it, the playbook
-produces to it, and downstream consumers (*meltiro* first among them)
-read it. The format evolves here, by a `schema_version` bump, and
-consumers follow. The number moves for any change to what counts as a
-bundle: what one may carry, and what fits through the hole. A rule that
-tightens only what was always malformed moves it too, even where no
-bundle that was right becomes wrong. Whether any real bundle changed
-status is a fact about somebody's corpus rather than about the format,
-and a consumer asking whether the rules have moved should not have to
-establish it first.
-
-The format is at `schema_version` 5. A bundle declares that version and
-a consumer accepts it; a bundle declaring any other version is not a
-bundle. A bundle stamped with an earlier version has not been checked
-against these rules, which is what the refusal says.
-
-Versions 3 and 4 are additions and nothing else. Version 3 added
-`tables/`, the optional table transcriptions described below; version 4
-added `supplements.json` and `supplements/`, the paper's supplementary
-material carried as its own thing. A correct version 2 bundle becomes a
-correct version 4 bundle by changing the integer, because everything
-either version adds is optional. Neither bump is about what a producer
-must now write. Both are about what a consumer may now rely on, which is
-that these directories have been checked rather than ignored as the
-paperwork any bundle is free to carry.
-
-Version 5 is the first that is not an addition. It holds an exhibit
-label to the whole of the id's rule, the pattern and at least one letter
-or digit both, where the validator had been applying only the pattern. A
-version 4 bundle becomes a version 5 bundle by changing the integer and
-validating again, and the second half is the point: what a tightening
-changes cannot be read off the integer alone.
+is normative: `tools/validate_bundle.py` enforces it, a converter
+produces to it, and downstream consumers read it. The format evolves
+here, by a `schema_version` bump, and consumers follow. The number
+moves for any change to what counts as a bundle: what one may carry,
+and what bundles are valid.
 
 ## Layout
 
-One directory per paper, self-contained and human-authorable. Papers
-are copyrighted, so bundles are never committed; they are produced and
-consumed at run time.
+One directory per paper, self-contained and human-authorable.
 
     paper-bundle/
       manifest.json     (required)  identity and the exhibit declaration
@@ -64,24 +35,31 @@ check after the parse can report: the evidence is gone before anything
 runs. It is refused during the parse, the last moment both values still
 exist. Keys are compared after JSON string unescaping, so `\u0069d` and
 `id` are the same key. Every repeated key in the file is named, with
-its position, and the manifest's other rules are still checked: what
-they say about the rest of the file is true whatever the duplicate
-resolved to. The rule matters most on `id`, since a manifest declaring
-it twice carries the paper into a consumer under whichever value
-happened to come last.
+its position, and nothing else is: a check on a duplicated key reads
+whichever value the parse kept, so it would report a `schema_version`
+the file may also state correctly, and carry an arbitrary `id` on into
+the comparison with supplements.json to accuse the wrong file. The rule
+matters most on `id`, since a manifest declaring it twice carries the
+paper into a consumer under whichever value happened to come last.
 
 | key | required | rule |
 |---|---|---|
 | schema_version | yes | the integer 5; a JSON boolean is not an integer |
-| id | yes | non-empty string matching `^[A-Za-z0-9._-]+$` with at least one letter or digit |
+| id | yes | non-empty string matching `^[A-Za-z0-9._-]+$` with at least one letter or digit, and not starting with a dot |
 | title | yes | non-empty string, the title as printed |
 | exhibits | yes | list of exhibit entries; may be `[]` |
-| doi | no | string |
+| doi | no | string; may be empty where the paper prints none |
 | summary | no | non-empty string when present |
 
 - The id names output directories in consumers, so it is restricted to
   filename-safe characters, and ids without any letter or digit (".",
   "..") are rejected as path hazards.
+- A leading dot is refused wherever this rule applies, though a dot
+  elsewhere (`fig.01`) is fine. Every walk over a bundle, this
+  validator's and a consumer's, skips dot-leading entries as OS
+  metadata, so a dot-leading name would declare a file nothing ever
+  reads, and the report about it would tell an author a file that is
+  really there is missing.
 - `summary` is the paper's short identity for consumers that need one
   without reading the full text; the paper's abstract is the natural
   value. An empty string is a mistake, not a signal.
@@ -111,18 +89,31 @@ and optionally `notes` (non-empty string when present). No other keys.
 ## text.md
 
 Required, UTF-8, non-empty. The full text of the paper as markdown.
-The contract checks shape only; the authoring conventions that make a
-good text.md (heading depths mirroring the paper, exhibit sentinels,
-emphasis as printed, character fidelity) are the playbook's
-`quality.md`, and the reason they matter downstream is that extraction
-evidence is quoted verbatim against this file, markdown syntax
-included.
+The contract checks shape only. The conventions that make a good
+text.md (heading depths mirroring the paper, exhibit sentinels,
+emphasis as printed, character fidelity) belong to the converter that
+writes one, and differ between converters on purpose.
 
 ## figures/
 
 Optional as a directory: absent means no images, and the manifest's
 `exhibits` is what says whether that is correct. When present, every
 file is a `.png` whose stem is a declared label.
+
+The suffix is exactly `.png`, lowercase. `.PNG` is a stray file and is
+refused as one. The rule is exact rather than case-insensitive because
+this specification promises a consumer the literal path
+`figures/<label>.png`: on a case-sensitive filesystem a case-insensitive
+rule would validate a bundle whose promised path does not exist, and it
+would let `x.png` and `x.PNG` sit side by side and merge into one label
+with nothing said about the one that lost.
+
+A crop is a non-empty regular file whose first eight bytes are the PNG
+signature. That is not a check on the image: nothing here decodes a
+pixel, and what the crop shows is beyond this contract. It is a check
+that the file is one, so that "no problems" cannot be said over an empty
+file, a JPEG that was renamed, or a symlink to nothing. Every supplement's
+crops are held to the same rule.
 
 `alteksto.bundle.figure_files(path)` answers which files those are, label
 to path, so a consumer reads the directory the way the validator does
@@ -140,16 +131,20 @@ citable image no one vouched for.
 ## tables/
 
 Optional as a directory, and optional exhibit by exhibit: absent means
-no exhibit carries a transcription, which is what every exhibit meant
-before this directory existed. When present, every file is a `.html`
-whose stem is a declared label.
+no exhibit carries a transcription. When present, every file is a `.html`
+whose stem is a declared label. The suffix is exactly `.html`,
+lowercase, on the same terms and for the same reasons as `.png`.
 
 A transcription is the exhibit's content as text, beside the crop and
 never instead of it. The crop remains required for every declared
 exhibit, and it remains what the exhibit *is*: a transcription is a
 reading of it, offered so that a consumer can quote a cell, slice a
-column, or hand a model rows rather than pixels. Where the two
-disagree, the page decides, then the crop.
+column, or hand a model rows rather than pixels. So where the two
+disagree, the transcription is what is wrong. The exception is a crop
+cut from the wrong region, which only the printed page settles, and
+which a producer settles before either file is written. No check
+compares the two, and the page is not in the bundle to compare them
+against: a consumer that has to choose, chooses the crop.
 
 `alteksto.bundle.table_files(path)` answers which files those are, label
 to path, the way `figure_files` does for crops.
@@ -171,7 +166,25 @@ it:
 - **Attributes**: `colspan` and `rowspan` on a cell, `scope` on a `th`
   (`col`, `row`, `colgroup` or `rowgroup`). No others, `style` and
   `class` included: they say how a table looks, and how it looks is
-  what the crop is for.
+  what the crop is for. A span's value is ASCII digits naming a whole
+  number of at least one, so the forms HTML tolerates and reinterprets
+  (`0`, a sign, a decimal point, surrounding space, digits from another
+  script) are refused rather than guessed at. An attribute written with
+  no value is refused, and an attribute written twice is refused: a
+  parser keeps the first and silently drops the rest, which is a value
+  in the file that nothing will ever read.
+- **Every element is opened and closed**, `<br>` excepted, which is the
+  one void element a cell may carry. The self-closing form of anything
+  else is refused, because HTML gives `<td/>` no meaning and parsers
+  disagree about what follows it.
+- **A byte order mark at the start of the file is ignored.** It is
+  ignored here and fatal in `manifest.json`, which is not an
+  inconsistency: JSON has no place for one and this format does not
+  invent one, while HTML has always tolerated it and refusing it would
+  refuse files that every consumer reads correctly.
+- **An empty file is not a transcription.** An exhibit with nothing to
+  transcribe omits the file; a `tables/<label>.html` that exists says
+  the exhibit's content is in it.
 - **The grid must tile exactly.** Laying the cells out row by row, each
   taking the next free position and claiming the positions its spans
   cover, every position in the table's rectangle is covered exactly
@@ -233,7 +246,10 @@ and so is a declaration naming a supplement that is not there. An empty
 error on its own. `supplements/` holds directories and nothing else: a
 loose file in it is refused whether or not there is a declaration beside
 it, because it is neither a supplement nor a supplement's asset and
-nothing would ever read it.
+nothing would ever read it. `supplements` must itself be a directory,
+and a file of that name is refused in those words rather than reported
+as every declared supplement being absent, which is the same fault said
+once instead of once per supplement.
 
 A supplement is the paper's supplementary material, converted as its own
 thing and kept out of the article. That separation is the whole point of
@@ -327,6 +343,37 @@ here, where every label in the bundle is visible at once. Prefixing a
 supplement's labels with its name (`supplement_3_table_01`) is the
 convention that keeps them apart.
 
+## What the validator promises
+
+`alteksto.bundle.bundle_problems(path)` returns a list of strings, one
+per problem, and an empty list means valid. Three promises hold for any
+input at all, a hostile one included:
+
+- **It never raises.** Not for a malformed bundle, and not for a disk
+  that will not cooperate. A directory that cannot be listed, a file
+  where a directory belongs, a symlink to nothing, a JSON number too
+  long for the interpreter to build: each is answered with a problem.
+- **It never blocks.** A path that is not a regular file is refused as
+  one before anything opens it, so a pipe or a device named `text.md`
+  cannot leave a run waiting forever. Not returning would be worse than
+  raising, because nothing downstream could tell it apart from slow.
+- **Every problem it reports is true of the file it names.** This is the
+  one that costs something. Where a check would have to read a value it
+  cannot trust, it does not run: a cross-check is skipped when either
+  side is malformed, a manifest with a repeated key ends its own report,
+  and an unreadable directory is one problem rather than a claim about
+  each file it might have held. So a report is not always complete, and
+  fixing what it names and running again is part of using it. A problem
+  derived from a guess reads exactly like one derived from a fact, and
+  would bury the fault it grew from.
+
+The words a problem uses matter as much as the rule behind it. A
+problem names the file, says what is wrong with it, and says why the
+rule exists, so that an author can act on it without reading this
+document. It never quotes an interpreter's advice about how to make the
+reader accept the file, because that is the wrong way round: the fault
+is the bundle.
+
 ## What validation cannot see
 
 No check reads the pixels or the prose. A crop that clips its header
@@ -339,8 +386,8 @@ way worth knowing: it catches a cell that leaves its row short, but a
 cell dropped and absorbed by a neighbour's `colspan` still tiles, and
 cell merging is a common way a table is misread. That one is the
 render's to catch, because a merged cell and two cells do not draw
-alike. Those are held by the producing route's gates (the
-playbook) and by whoever reads the bundle, not by this contract.
+alike. Those are held by whatever checks a converter runs on its own
+way to a bundle, and by whoever reads the bundle, not by this contract.
 
 The transcription is the place where that gap matters most, because
 text invites quoting in a way an image does not. What closes it is the

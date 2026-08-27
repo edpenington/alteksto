@@ -113,12 +113,12 @@ def bundle_problems(path) -> list[str]:
     # would otherwise report every file in it as missing, which is
     # false: nothing could be read at all.
     try:
-        _list_directory(root)
+        entries = _list_directory(root)
     except OSError as exc:
         return [f"bundle directory could not be read: {exc}; nothing "
                 f"in it can be checked"]
 
-    problems: list[str] = []
+    problems: list[str] = _miscased_entry_problems(entries, _CONTRACT_ENTRIES)
     manifest_problems, declared, paper_id = _manifest_problems(root)
     figure_problems, present = _figure_problems(root)
     table_problems, transcribed = _table_problems(root)
@@ -146,6 +146,42 @@ def bundle_problems(path) -> list[str]:
         # the rest.
         problems.extend(_label_uniqueness_problems(
             declared if declared is not None else [], supplements))
+    return problems
+
+
+# The six entries the layout names, and the three a supplement holds.
+# They are matched exactly, which is the whole reason this list exists:
+# see _miscased_entry_problems.
+_CONTRACT_ENTRIES = ("manifest.json", "text.md", "figures", "tables",
+                     "supplements.json", "supplements")
+_SUPPLEMENT_ENTRIES = ("text.md", "figures", "tables")
+
+
+def _miscased_entry_problems(entries, contract, where="the bundle"):
+    """Refuse an entry that is a contract name in the wrong case.
+
+    A case-insensitive filesystem, which is the macOS default, keeps
+    `Figures/` and answers to `figures/` as well, so a bundle built on
+    one validates while every path this format promises is absent on a
+    case-sensitive consumer. That is the same fault the exact `.png`
+    suffix rule exists to stop, one level up, and it is worse: it is
+    invisible on the machine that produced it.
+
+    Only a name that differs from a contract name by case is refused. A
+    bundle may carry its own paperwork beside the six, so `Notes.md` is
+    nobody's business but the author's.
+    """
+    problems: list[str] = []
+    present = {entry.name for entry in entries}
+    folded = {name.lower(): name for name in present}
+    for name in contract:
+        held = folded.get(name)
+        if held is not None and held != name:
+            problems.append(
+                f"{where} holds {held!r} where the format names "
+                f"{name!r}; the names are matched exactly, so a "
+                f"consumer on a case-sensitive filesystem would find "
+                f"nothing at {name!r}")
     return problems
 
 
@@ -239,7 +275,7 @@ def _manifest_problems(root: Path):
     try:
         data, duplicates = _parse_manifest(raw)
     except json.JSONDecodeError as exc:
-        return [f"manifest.json is not valid JSON: {exc}"], None, None
+        return [_json_problem("manifest.json", raw, exc)], None, None
     except ValueError:
         # JSONDecodeError is a ValueError and is caught above, so this
         # clause sees only a file json read as JSON and Python then
@@ -359,6 +395,22 @@ def _parse_manifest(raw):
         return mapping
 
     return json.loads(raw, object_pairs_hook=collect), duplicates
+
+
+def _json_problem(where: str, raw: str, exc) -> str:
+    """One JSON parse failure, in the format's words not the decoder's.
+
+    json's own message for a byte order mark ends by naming the codec
+    that would accept the file, which is advice for someone writing a
+    reader and the wrong way round for someone holding a bundle. The
+    mark is named here instead. Every other parse failure keeps the
+    decoder's line and column, which are the useful part of it.
+    """
+    if raw.startswith("\ufeff"):
+        return (f"{where} starts with a byte order mark; JSON has no "
+                f"place for one, so the file is not JSON until it is "
+                f"taken off the front")
+    return f"{where} is not valid JSON: {exc}"
 
 
 def _duplicate_key_problems(data, duplicates,
@@ -591,8 +643,22 @@ def _figure_problems(root: Path, prefix: str = ""):
                             f"(the suffix must be exactly .png, "
                             f"lowercase): {child.name}")
     crops = figure_files(root)
+    usable: list[str] = []
     for label, path in crops.items():
         where = f"{prefix}figures/{label}.png"
+        # Asked before anything binds this label to a declaration, which
+        # would otherwise tell the author to declare a stem no
+        # declaration may carry, and earn them the name rule's refusal
+        # for following the advice. A stem that can never be a label is
+        # left out of what comes back, so the one fault is said once.
+        stem_problem = name_problem(
+            label, "stem", where,
+            "a crop's stem is the label an exhibit is declared and cited"
+            " under, so it obeys the rule every label obeys")
+        if stem_problem:
+            problems.append(stem_problem)
+            continue
+        usable.append(label)
         if not path.is_file():
             problems.append(f"{where} is not a regular file; a crop is "
                             f"an ordinary file holding a PNG image, and "
@@ -613,7 +679,7 @@ def _figure_problems(root: Path, prefix: str = ""):
                             f"signature; whatever the file holds, it is "
                             f"not a PNG, and a consumer opening it as "
                             f"one fails")
-    return problems, list(crops)
+    return problems, usable
 
 
 def _exhibit_binding_problems(declared_labels, present_labels,
@@ -627,9 +693,13 @@ def _exhibit_binding_problems(declared_labels, present_labels,
     declared = set(declared_labels)
     present = set(present_labels)
     for label in sorted(declared - present):
+        # "no file named" rather than "there is no": on a case-insensitive
+        # filesystem the path opens when the crop is `TABLE_01.PNG`, so
+        # the flat claim is checkably false on the machine that built it,
+        # and it is the name, not the path, that this binds.
         problems.append(
-            f"{declared_in} declares exhibit {label!r} but there is no "
-            f"{prefix}figures/{label}.png")
+            f"{declared_in} declares exhibit {label!r} but no file in "
+            f"{prefix}figures/ is named {label}.png")
     for label in sorted(present - declared):
         problems.append(
             f"{prefix}figures/{label}.png is not declared in "
@@ -850,6 +920,7 @@ class _TableHTMLParser(HTMLParser):
         self.problems: list[str] = []
         self.stack: list[str] = []
         self.seen_table = False
+        self.second_table = False
         self.rows_opened = 0
         self.row_index = -1
         self.column = 0
@@ -891,11 +962,20 @@ class _TableHTMLParser(HTMLParser):
         # saying every other element is opened and closed beside it
         # would teach an author to write the refused element that way
         # and be refused again.
-        if tag in _TABLE_ELEMENTS and tag not in _VOID_ELEMENTS:
+        miswritten = (tag in _TABLE_ELEMENTS
+                      and tag not in _VOID_ELEMENTS)
+        if miswritten:
             self._problem(f"writes <{tag}/> in the self-closing form; only "
                           f"<br> is written that way, and every other "
                           f"element is opened and closed")
         self._check_element(tag, attrs)
+        if miswritten:
+            # Read on as HTML5 reads it: the stray slash on a non-void
+            # element means nothing, so the element is open and what
+            # follows is inside it. Treating it as closed would move a
+            # cell's own text outside the cell and report nesting
+            # faults the author never wrote.
+            self.stack.append(tag)
 
     def handle_endtag(self, tag):
         if tag in _VOID_ELEMENTS:
@@ -990,6 +1070,7 @@ class _TableHTMLParser(HTMLParser):
                 self._problem("holds more than one <table>; a "
                               "transcription is one exhibit, so it is one "
                               "table")
+                self.second_table = True
             elif parent is not None:
                 self._problem(f"opens <table> inside <{parent}>; the file "
                               f"is a single table at its root")
@@ -1049,7 +1130,8 @@ class _TableHTMLParser(HTMLParser):
         scope = values.get("scope")
         if "scope" in values and scope not in ("col", "row", "colgroup",
                                                "rowgroup"):
-            self._problem(f"gives <{tag}> scope={scope!r}; scope is col, "
+            shown = scope if len(scope) <= 40 else scope[:40] + "..."
+            self._problem(f"gives <{tag}> scope={shown!r}; scope is col, "
                           f"row, colgroup or rowgroup")
         return values
 
@@ -1063,17 +1145,32 @@ class _TableHTMLParser(HTMLParser):
         # would not, and "\u0662" converts to 2 where a renderer reading
         # HTML's ASCII-only rule for a non-negative integer reads 1. Either
         # way the grid this validates is not the grid a consumer lays out.
+        # Shown truncated, as text outside a cell is: a value written as
+        # five thousand characters is the fault, not something the
+        # problem string repeats in full.
+        shown = raw if len(raw) <= 40 else raw[:40] + "..."
         if not (raw.isascii() and raw.isdigit()):
-            self._problem(f"gives <{tag}> {name}={raw!r}; a span is a "
+            self._problem(f"gives <{tag}> {name}={shown!r}; a span is a "
                           f"positive whole number")
             return 1
-        span = int(raw)
+        # Judged by digit count before int() sees the value: CPython
+        # refuses to convert thousands of digits, and its ValueError
+        # quotes advice about raising the reader's limit when the fault
+        # is the file. Leading zeros are stripped first, so a legal span
+        # padded with them stays legal, and what is converted below is
+        # always short enough to convert.
+        digits = raw.lstrip("0")
+        if len(digits) > len(str(_SPAN_LIMIT)):
+            self._problem(f"gives <{tag}> {name}={shown!r}, beyond the "
+                          f"{_SPAN_LIMIT} this format allows for one span")
+            return 1
+        span = int(digits) if digits else 0
         if span < 1:
-            self._problem(f"gives <{tag}> {name}={raw!r}; a span is at "
+            self._problem(f"gives <{tag}> {name}={shown!r}; a span is at "
                           f"least 1")
             return 1
         if span > _SPAN_LIMIT:
-            self._problem(f"gives <{tag}> {name}={raw!r}, beyond the "
+            self._problem(f"gives <{tag}> {name}={shown!r}, beyond the "
                           f"{_SPAN_LIMIT} this format allows for one span")
             return 1
         return span
@@ -1131,11 +1228,22 @@ class _TableHTMLParser(HTMLParser):
         # fix.
         if self.grid_overflowed:
             return problems
+        # A second <table> was refused, but its rows and cells were
+        # still read into the one grid, so a grid verdict here would
+        # describe a table the file does not contain. The refusal
+        # carries the fault.
+        if self.second_table:
+            return problems
         if not self.cells:
             problems.append(f"{self.where} has no cells; an exhibit with "
                             f"nothing to transcribe omits the file")
             return problems
-        for row in self.empty_rows:
+        # Reported up to a handful, then counted, for the reason holes
+        # are: past the first few it is the same mangling seen again,
+        # and thousands of lines of it would bury the file's other
+        # problems rather than adding to them.
+        shown_empty = self.empty_rows[:5]
+        for row in shown_empty:
             problems.append(f"{self.where} writes no cells in "
                             f"{self._at(row)}; "
                             f"every row carries at least one. A row whose "
@@ -1143,6 +1251,10 @@ class _TableHTMLParser(HTMLParser):
                             f"above prints nothing, so no exhibit has one, "
                             f"and keeping one to be covered is how a row "
                             f"that went missing gets hidden")
+        if len(self.empty_rows) > len(shown_empty):
+            problems.append(f"{self.where} writes no cells in "
+                            f"{len(self.empty_rows) - len(shown_empty)} "
+                            f"further rows")
         problems.extend(self._overhang_problems())
         problems.extend(self._grid_problems())
         return problems
@@ -1297,7 +1409,7 @@ def _supplement_problems(root: Path, manifest_id):
     try:
         data, duplicates = _parse_manifest(raw)
     except json.JSONDecodeError as exc:
-        return [f"supplements.json is not valid JSON: {exc}"] + stray, None
+        return [_json_problem("supplements.json", raw, exc)] + stray, None
     except ValueError:
         # As in the manifest's parse: JSONDecodeError is caught above,
         # and what reaches here is a value Python refused to build,
@@ -1356,7 +1468,8 @@ def _supplement_problems(root: Path, manifest_id):
     if present is not None:
         for name in sorted(set(declared) - set(present)):
             problems.append(f"supplements.json declares supplement {name!r} "
-                            f"but there is no supplements/{name}/")
+                            f"but no directory in supplements/ is named "
+                            f"{name}")
         for name in sorted(set(present) - set(declared)):
             problems.append(f"supplements/{name}/ is not declared in "
                             f"supplements.json; a supplement a consumer can "
@@ -1481,13 +1594,15 @@ def _supplement_contents_problems(root: Path, supplements) -> list[str]:
         supplement = root / "supplements" / name
         prefix = f"supplements/{name}/"
         try:
-            _list_directory(supplement)
+            entries = _list_directory(supplement)
         except OSError as exc:
             # As at the bundle root: an unreadable directory would
             # otherwise report its every file as missing.
             problems.append(f"{prefix} could not be read: {exc}; "
                             f"nothing in it can be checked")
             continue
+        problems.extend(_miscased_entry_problems(
+            entries, _SUPPLEMENT_ENTRIES, prefix.rstrip("/")))
         figure_problems, cropped = _figure_problems(supplement, prefix)
         table_problems, transcribed = _table_problems(supplement, prefix)
         problems.extend(_supplement_text_problems(supplement, prefix))

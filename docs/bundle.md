@@ -25,6 +25,14 @@ so a bundle may carry its own paperwork. Inside `figures/` and
 subdirectory is an error, and only hidden OS metadata (dotfiles) is
 skipped.
 
+Those six names are matched exactly, and so are the three inside a
+supplement. `Figures/` is not `figures/`. The rule is stated because
+the common case is invisible without it: a case-insensitive filesystem,
+which is the macOS default, answers to either spelling, so a bundle
+built there validates while holding nothing a case-sensitive consumer
+can open. A name that merely resembles none of the six is nobody's
+business, so `Notes.md` beside them is fine.
+
 ## manifest.json
 
 A single JSON object. Unknown keys are errors, at the top level and
@@ -45,7 +53,7 @@ paper into a consumer under whichever value happened to come last.
 | key | required | rule |
 |---|---|---|
 | schema_version | yes | the integer 5; a JSON boolean is not an integer |
-| id | yes | non-empty string matching `^[A-Za-z0-9._-]+$` with at least one letter or digit, and not starting with a dot |
+| id | yes | non-empty string; the name rule below |
 | title | yes | non-empty string, the title as printed |
 | exhibits | yes | list of exhibit entries; may be `[]` |
 | doi | no | string; may be empty where the paper prints none |
@@ -123,6 +131,11 @@ Two cross-checks bind declaration to directory, both hard errors:
 
 - every declared label must have its `figures/<label>.png`;
 - every `figures/*.png` must be declared with its caption.
+
+A crop's stem obeys the label rule before either of those runs. A stem
+no declaration could carry would otherwise be told to declare itself,
+and an author following that advice earns the name rule's refusal for
+doing so.
 
 The first catches a manifest promising an image that is not there; the
 second catches a stray or misnamed crop, which would otherwise become a
@@ -304,7 +317,7 @@ Each entry carries `name`, `title` and `exhibits`. No other keys.
 - `title` is what the paper calls the supplement, as printed
   ("Supplement 3. Characteristics of included studies"). It is what a
   consumer choosing between supplements chooses on, and `name` alone is
-  too thin to choose on.
+  too thin to choose on. A non-empty string, as the manifest's is.
 - `exhibits` is declared on exactly the manifest's terms, `label` and
   `caption` and optional `notes`, and may be `[]` when the supplement
   holds no tables or figures.
@@ -375,6 +388,13 @@ reader accept the file, because that is the wrong way round: the fault
 is the bundle.
 
 ## What validation cannot see
+
+A bundle is not checked for self-containment. A `text.md` that is a
+symlink to somewhere outside the bundle validates, and travels as a
+dangling link. Two things the parse tolerates are worth naming too: a
+JSON literal of `NaN` or `Infinity`, which Python's reader accepts and
+this format's typing then refuses on other grounds, so such a file
+never validates but is never called invalid JSON either.
 
 No check reads the pixels or the prose. A crop that clips its header
 row passes; a text.md with a fabricated paragraph passes; a paper full

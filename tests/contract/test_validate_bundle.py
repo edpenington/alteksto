@@ -110,6 +110,61 @@ def test_missing_manifest_and_text_both_reported(tmp_path):
     assert any("text.md is missing" in p for p in problems)
 
 
+@pytest.mark.parametrize("held,names", [
+    ("MANIFEST.JSON", "manifest.json"), ("Text.md", "text.md"),
+    ("Figures", "figures"), ("Tables", "tables"),
+    ("Supplements.json", "supplements.json"), ("SUPPLEMENTS", "supplements"),
+])
+def test_a_contract_entry_in_the_wrong_case_is_refused(tmp_path, held, names):
+    """The trap this format is otherwise built to walk into.
+
+    macOS is case-insensitive by default, so a bundle holding `Figures/`
+    answers to `figures/` on the machine that produced it and holds
+    nothing a case-sensitive consumer can find. That is the argument the
+    exact `.png` suffix rule already rests on, one level up, and it is
+    worse here: the crop rule at least fails on the author's own
+    machine, while this one is invisible until the bundle travels.
+
+    The rename is done on a bundle that is otherwise valid, so the only
+    thing under test is the name.
+    """
+    bundle = make_bundle(tmp_path / "b", figures=("table_01",),
+                         tables={"table_01": TABLE_STUB})
+    add_supplement(bundle, "appendix_a")
+    declare_supplements(bundle, [entry("appendix_a")])
+    assert bundle_problems(bundle) == []
+    (bundle / names).rename(bundle / held)
+    problems = bundle_problems(bundle)
+    assert any(repr(held) in p and repr(names) in p
+               for p in problems), problems
+
+
+def test_a_supplement_entry_in_the_wrong_case_is_refused(tmp_path):
+    """A supplement is bundle-shaped, so it carries the same trap."""
+    bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+    add_supplement(bundle, "appendix_a")
+    declare_supplements(bundle, [entry("appendix_a")])
+    assert bundle_problems(bundle) == []
+    supplement = bundle / "supplements" / "appendix_a"
+    (supplement / "text.md").rename(supplement / "Text.md")
+    problems = bundle_problems(bundle)
+    assert any("supplements/appendix_a holds 'Text.md'" in p
+               for p in problems), problems
+
+
+def test_a_name_that_is_nobody_s_business_is_left_alone(tmp_path):
+    """Only a contract name in the wrong case is refused.
+
+    A bundle may carry its own paperwork beside the six entries, so a
+    file whose name merely resembles nothing in the contract is not the
+    format's affair however it is capitalised.
+    """
+    bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+    (bundle / "Notes.md").write_text("mine\n", encoding="utf-8")
+    (bundle / "README").write_text("mine\n", encoding="utf-8")
+    assert bundle_problems(bundle) == []
+
+
 @pytest.mark.skipif(os.name != "posix", reason="needs POSIX permissions")
 @pytest.mark.parametrize("mode", [0, 0o444])
 def test_an_unreadable_bundle_root_says_so_and_nothing_else(tmp_path, mode):
@@ -422,6 +477,25 @@ def test_a_malformed_exhibits_block_is_not_cross_checked(tmp_path):
     assert not any("not declared" in p for p in problems)
 
 
+def test_a_byte_order_mark_is_named_not_prescribed_around(tmp_path):
+    """The one JSON fault whose own message teaches the way round it.
+
+    json says "Unexpected UTF-8 BOM (decode using utf-8-sig)", which is
+    advice for someone writing a reader, and the wrong way round for
+    someone holding a bundle: the fault is the file. The mark is named
+    here instead, and no codec is.
+    """
+    bundle = make_bundle(tmp_path / "b")
+    raw = (bundle / "manifest.json").read_text(encoding="utf-8")
+    (bundle / "manifest.json").write_bytes(
+        b"\xef\xbb\xbf" + raw.encode("utf-8"))
+    problems = bundle_problems(bundle)
+    assert len(problems) == 1, problems
+    assert "byte order mark" in problems[0]
+    assert "utf-8-sig" not in problems[0]
+    assert "decode using" not in problems[0]
+
+
 @pytest.mark.parametrize("raw, expected", [
     ("{not json", "not valid JSON"),
     ('["a", "list"]', "must be a JSON object"),
@@ -678,7 +752,7 @@ def test_cross_check_both_directions(tmp_path):
     # Declared but no PNG.
     bundle = make_bundle(tmp_path / "declared", figures=("table_01",))
     (bundle / "figures" / "table_01.png").unlink()
-    assert any("no figures/table_01.png" in p
+    assert any("no file in figures/ is named table_01.png" in p
                for p in bundle_problems(bundle))
     # PNG but not declared.
     bundle2 = make_bundle(tmp_path / "stray")
@@ -686,6 +760,22 @@ def test_cross_check_both_directions(tmp_path):
     (bundle2 / "figures" / "figure_09.png").write_bytes(PNG_STUB)
     assert any("figure_09.png is not declared" in p
                for p in bundle_problems(bundle2))
+
+
+def test_a_crop_whose_stem_can_never_be_a_label_says_so(tmp_path):
+    """The fault is the file's name, so the problem is about the name.
+
+    Read only as an undeclared crop, this earns "every supplied image
+    must be declared with its caption", and an author who follows that
+    advice writes a label the name rule then refuses. One fault, said
+    once, in the words that lead to the fix.
+    """
+    bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+    (bundle / "figures" / "tabl\u00e9_01.png").write_bytes(PNG_STUB)
+    problems = bundle_problems(bundle)
+    assert len(problems) == 1, problems
+    assert "stem" in problems[0] and "^[A-Za-z0-9._-]+$" in problems[0]
+    assert "must be declared with its caption" not in problems[0]
 
 
 def test_figures_rejects_non_png_and_subdirs(tmp_path):
@@ -714,7 +804,8 @@ def test_a_png_suffix_must_be_exactly_lowercase(tmp_path):
     problems = bundle_problems(bundle)
     assert any("table_01.PNG" in p and "lowercase" in p
                for p in problems), problems
-    assert any("no figures/table_01.png" in p for p in problems), problems
+    assert any("no file in figures/ is named table_01.png" in p
+               for p in problems), problems
 
 
 def test_a_crop_beside_its_uppercase_twin_is_not_a_silent_merge(tmp_path):
@@ -1043,6 +1134,41 @@ def test_a_refused_element_self_closed_is_one_problem():
     assert not any("self-closing" in p for p in problems), problems
 
 
+def test_a_second_table_ends_the_grid_verdicts():
+    """The refusal carries the fault; a verdict would narrate fiction.
+
+    A nested table's rows and cells land in the outer table's grid, so
+    every hole, overhang and empty row judged after it describes a
+    table the file does not contain: a 1 by 2 table holding a 1 by 2
+    table was reported as a holed 2 by 3. The one refusal is the
+    answer, the way an overflowed grid already answers with its one
+    problem.
+    """
+    nested = ('<table><tr><td><table><tr><td>a</td><td>b</td></tr>'
+              '</table></td><td>c</td></tr></table>')
+    beside = ('<table><tr><td>a</td></tr></table>'
+              '<table><tr><td>b</td></tr></table>')
+    for markup in (nested, beside):
+        problems = table_html_problems(markup, "t.html")
+        assert len(problems) == 1, problems
+        assert "holds more than one <table>" in problems[0]
+
+
+def test_a_self_closed_cell_keeps_its_text_and_its_close():
+    """The stray slash is the fault, not what follows it.
+
+    HTML5 reads <td/> as <td>: the slash means nothing, the element is
+    open, and the text after it is inside the cell. Read as closed
+    instead, the same file also earned "text outside any cell" and a
+    nesting complaint for its own </td>, both false of the file. The
+    complaint about the form is the whole answer.
+    """
+    markup = "<table><tr><td/>a</td><td>b</td></tr></table>"
+    problems = table_html_problems(markup, "t.html")
+    assert len(problems) == 1, problems
+    assert "writes <td/> in the self-closing form" in problems[0]
+
+
 def test_a_holed_grid_reports_its_position_and_stops_counting(tmp_path):
     """Five holes are named and the rest are counted.
 
@@ -1109,7 +1235,7 @@ def test_a_transcription_never_stands_in_for_a_crop(tmp_path):
     manifest = json.loads((bundle / "manifest.json").read_text())
     manifest["exhibits"] = [{"label": "table_01", "caption": "A table."}]
     (bundle / "manifest.json").write_text(json.dumps(manifest))
-    assert any("there is no figures/table_01.png" in p
+    assert any("no file in figures/ is named table_01.png" in p
                for p in bundle_problems(bundle))
 
 
@@ -1269,6 +1395,23 @@ def test_an_empty_row_is_one_problem_not_a_problem_per_column():
     assert any("leaves row 3 column 2" in p for p in problems), problems
 
 
+def test_a_run_of_empty_rows_is_capped_like_holes():
+    """Five are named and the rest are counted, as holes are.
+
+    A transcription mangled into thousands of empty rows is one
+    mangling, and thousands of copies of the same problem would bury
+    whatever else the file gets wrong, which is the flood the hole cap
+    already stops.
+    """
+    markup = ("<table><tr><td>a</td></tr>" + "<tr></tr>" * 200
+              + "</table>")
+    problems = table_html_problems(markup, "t.html")
+    named = [p for p in problems if "writes no cells in row" in p]
+    assert len(named) == 5, problems[:7]
+    assert any("writes no cells in 195 further rows" in p
+               for p in problems), problems[-2:]
+
+
 def test_the_occupancy_is_bounded_as_it_is_built(tmp_path):
     """The limit has to bite during the parse, not after it.
 
@@ -1348,6 +1491,47 @@ def test_a_bad_span_does_not_abort_the_rest_of_the_file():
     problems = table_html_problems(markup, "t.html")
     assert any("a span is a positive whole number" in p for p in problems)
     assert any("the attribute 'style'" in p for p in problems), problems
+
+
+def test_a_span_of_thousands_of_digits_is_the_format_s_refusal():
+    """CPython refuses to convert more than 4300 digits, loudly.
+
+    Left to int(), the ValueError aborts the parse, calls a file that
+    parsed fine unparseable, ends the report there, and quotes
+    sys.set_int_max_str_digits(), which is advice about making the
+    reader accept the file when the fault is the file. The digits are
+    counted before anything converts, and the refusal is the same one
+    every oversized span gets. Leading zeros are not counted, so a
+    legal span padded with them stays legal.
+    """
+    markup = ('<table><tr><td colspan="' + "9" * 5000 + '">a</td>'
+              '<td style="x">b</td></tr></table>')
+    problems = table_html_problems(markup, "t.html")
+    assert any("beyond the 1000 this format allows" in p
+               for p in problems), [p[:80] for p in problems]
+    assert not any("could not be parsed" in p for p in problems), problems
+    # The report continues past the refusal.
+    assert any("the attribute 'style'" in p for p in problems), problems
+    padded = ('<table><tr><td colspan="' + "0" * 5000 + '2">a</td>'
+              '<td>b</td></tr></table>')
+    assert table_html_problems(padded, "t.html") == []
+
+
+def test_a_gigantic_attribute_value_is_not_quoted_whole():
+    """What a problem shows of a value is capped, as stray text is.
+
+    The value being five thousand characters is the fault; a problem
+    string repeating all of them buries the rest of the report under
+    the thing it is reporting.
+    """
+    for attr in ('colspan="' + "9" * 5000 + '"',
+                 'colspan="' + "0" * 5000 + '"',
+                 'scope="' + "x" * 5000 + '"'):
+        markup = f"<table><tr><th {attr}>a</th></tr></table>"
+        problems = table_html_problems(markup, "t.html")
+        assert problems, attr
+        assert all(len(p) < 200 for p in problems), [p[:80]
+                                                     for p in problems]
 
 
 def test_a_bare_attribute_is_said_in_words():
@@ -1501,7 +1685,7 @@ def test_a_fault_in_a_later_supplement_is_reported(tmp_path):
                                  entry("supplement_3",
                                        ("supplement_3_fig_01",))])
     problems = bundle_problems(bundle)
-    assert any("there is no supplements/supplement_3/figures/"
+    assert any("no file in supplements/supplement_3/figures/ is named "
                "supplement_3_fig_01.png" in p for p in problems), problems
     assert any("supplements/supplement_3/figures/sneaked_in.png is not "
                "declared" in p for p in problems), problems
@@ -1518,7 +1702,7 @@ def test_a_declaration_needs_its_directory(tmp_path):
     bundle = make_bundle(tmp_path / "b")
     declare_supplements(bundle, [entry("appendix_a")])
     problems = bundle_problems(bundle)
-    assert any("there is no supplements/appendix_a/" in p
+    assert any("no directory in supplements/ is named appendix_a" in p
                for p in problems), problems
 
 
@@ -1618,7 +1802,7 @@ def test_a_declared_supplement_with_no_directory_reports_once(tmp_path):
                                              for n in range(6)))])
     problems = bundle_problems(bundle)
     assert len(problems) == 1, problems
-    assert "there is no supplements/absent_one/" in problems[0]
+    assert "no directory in supplements/ is named absent_one" in problems[0]
 
 
 def test_supplements_that_is_not_a_directory_is_one_problem(tmp_path):
@@ -1756,7 +1940,7 @@ def test_a_supplement_s_exhibits_are_bound_to_its_own_figures(tmp_path):
     declare_supplements(bundle, [entry("appendix_a",
                                        ("appendix_a_table_01",))])
     problems = bundle_problems(bundle)
-    assert any("there is no supplements/appendix_a/figures/"
+    assert any("no file in supplements/appendix_a/figures/ is named "
                "appendix_a_table_01.png" in p for p in problems), problems
     assert any("supplements/appendix_a/figures/appendix_a_table_02.png is "
                "not declared" in p for p in problems), problems

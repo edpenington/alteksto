@@ -186,12 +186,12 @@ def bundle_problems(path) -> list[str]:
         return [f"bundle path is not a directory: {root}"]
 
     problems: list[str] = []
-    manifest_problems, declared, paper_id = _validate_manifest(root)
-    figure_problems, present = _validate_figures(root)
-    table_problems, transcribed = _validate_tables(root)
-    supplement_problems, supplements = _validate_supplements(root, paper_id)
+    manifest_problems, declared, paper_id = _manifest_problems(root)
+    figure_problems, present = _figure_problems(root)
+    table_problems, transcribed = _table_problems(root)
+    supplement_problems, supplements = _supplement_problems(root, paper_id)
     problems.extend(manifest_problems)
-    problems.extend(_validate_text(root))
+    problems.extend(_text_problems(root))
     problems.extend(figure_problems)
     problems.extend(table_problems)
     problems.extend(supplement_problems)
@@ -204,13 +204,13 @@ def bundle_problems(path) -> list[str]:
     if declared is not None and transcribed is not None:
         problems.extend(_cross_check_tables(declared, transcribed))
     if supplements:
-        problems.extend(_validate_supplement_contents(root, supplements))
+        problems.extend(_supplement_contents_problems(root, supplements))
     if declared is not None and supplements:
         problems.extend(_cross_check_label_uniqueness(declared, supplements))
     return problems
 
 
-def _validate_supplement_contents(root: Path, supplements) -> list[str]:
+def _supplement_contents_problems(root: Path, supplements) -> list[str]:
     """Each declared supplement's own text, figures and tables.
 
     A supplement directory is shaped like the bundle it sits in, so the
@@ -229,9 +229,9 @@ def _validate_supplement_contents(root: Path, supplements) -> list[str]:
         labels = supplements[name]
         supplement = root / "supplements" / name
         prefix = f"supplements/{name}/"
-        figure_problems, present = _validate_figures(supplement, prefix)
-        table_problems, transcribed = _validate_tables(supplement, prefix)
-        problems.extend(_validate_supplement_text(supplement, prefix))
+        figure_problems, present = _figure_problems(supplement, prefix)
+        table_problems, transcribed = _table_problems(supplement, prefix)
+        problems.extend(_supplement_text_problems(supplement, prefix))
         problems.extend(figure_problems)
         problems.extend(table_problems)
         if present is not None:
@@ -243,7 +243,7 @@ def _validate_supplement_contents(root: Path, supplements) -> list[str]:
     return problems
 
 
-def _validate_manifest(root: Path):
+def _manifest_problems(root: Path):
     """Return (problems, declared_labels, id) for manifest.json.
 
     declared_labels is the exhibits labels when the block is structurally
@@ -293,7 +293,7 @@ def _validate_manifest(root: Path):
             continue
         value = data[name]
         if ptype == "exhibits":
-            exhibit_problems, labels = _validate_exhibits(value)
+            exhibit_problems, labels = _exhibit_problems(value)
             problems.extend(exhibit_problems)
             if not exhibit_problems:
                 declared_labels = labels
@@ -433,8 +433,9 @@ def _walk_objects(root, where: str):
                          for index, item in enumerate(node))
 
 
-def _validate_exhibits(value, where="manifest.json"):
-    """Validate an exhibits value, the manifest's or a supplement's.
+def _exhibit_problems(value, where="manifest.json"):
+    """Every problem with an exhibits value, the manifest's or a
+    supplement's.
 
     Returns (problems, labels): the declared labels in declaration order,
     and every problem with the block's shape. An empty list is valid and
@@ -520,7 +521,7 @@ def _cross_check_exhibits(declared_labels, present_labels, prefix="",
     return problems
 
 
-def _validate_text(root: Path) -> list[str]:
+def _text_problems(root: Path) -> list[str]:
     text_path = root / "text.md"
     if not text_path.exists():
         return ["text.md is missing"]
@@ -594,7 +595,7 @@ def table_files(root) -> dict[str, Path]:
     return {label: found[label] for label in sorted(found)}
 
 
-def _validate_tables(root: Path, prefix: str = ""):
+def _table_problems(root: Path, prefix: str = ""):
     """Return (problems, transcribed_labels) for the tables/ directory.
 
     transcribed_labels is the label of every transcription table_files
@@ -1049,7 +1050,7 @@ def supplement_dirs(root) -> dict[str, Path]:
     return {name: found[name] for name in sorted(found)}
 
 
-def _validate_supplements(root: Path, manifest_id):
+def _supplement_problems(root: Path, manifest_id):
     """Return (problems, declared) for supplements.json and supplements/.
 
     declared is {name: labels} when the declaration is structurally sound,
@@ -1112,7 +1113,7 @@ def _validate_supplements(root: Path, manifest_id):
     # None from a lookup, and only one of them has already been reported.
     # Read as a lookup, `"supplements": null` was accepted in silence.
     if "supplements" in data:
-        declared = _validate_supplement_entries(data["supplements"], problems)
+        declared = _supplement_entry_problems(data["supplements"], problems)
     else:
         declared = None
     if declared is None:
@@ -1139,8 +1140,9 @@ def _stray_supplement_files(root: Path) -> list[str]:
             if not child.name.startswith(".") and not child.is_dir()]
 
 
-def _validate_supplement_entries(value, problems):
-    """Validate the declaration's supplements list; returns {name: labels}.
+def _supplement_entry_problems(value, problems):
+    """Every problem with the declaration's supplements list, appended to
+    `problems`; returns {name: labels}.
 
     None when the block is malformed enough that cross-checking it against
     the directories would bury the report under derived noise.
@@ -1188,7 +1190,7 @@ def _validate_supplement_entries(value, problems):
             problems.append(f"{where} is missing required key: 'exhibits'")
             malformed = True
             continue
-        entry_problems, labels = _validate_exhibits(entry["exhibits"], where)
+        entry_problems, labels = _exhibit_problems(entry["exhibits"], where)
         problems.extend(entry_problems)
         if entry_problems:
             malformed = True
@@ -1244,7 +1246,7 @@ def _cross_check_label_uniqueness(article_labels, supplements) -> list[str]:
     return problems
 
 
-def _validate_supplement_text(root: Path, prefix: str) -> list[str]:
+def _supplement_text_problems(root: Path, prefix: str) -> list[str]:
     """A supplement's text.md, which unlike the article's is optional.
 
     A supplement that is nothing but data tables prints no prose, and
@@ -1265,7 +1267,7 @@ def _validate_supplement_text(root: Path, prefix: str) -> list[str]:
     return []
 
 
-def _validate_figures(root: Path, prefix: str = ""):
+def _figure_problems(root: Path, prefix: str = ""):
     """Return (problems, present_labels) for the figures/ directory.
 
     `prefix` names where the directory sits when it is not the bundle's

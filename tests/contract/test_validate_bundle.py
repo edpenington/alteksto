@@ -14,8 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from alteksto.bundle import (SCHEMA_VERSION, _walk_objects, figure_files,
-                             supplement_dirs, table_files, validate_bundle,
+from alteksto.bundle import (SCHEMA_VERSION, _name_problem, _walk_objects,
+                             figure_files, is_filename_safe, supplement_dirs,
+                             table_files, validate_bundle,
                              validate_table_html)
 from tests.support import REPO_ROOT, load_script
 
@@ -183,6 +184,63 @@ def test_an_exhibit_label_is_filename_and_citation_safe(tmp_path):
     (bundle / "manifest.json").write_text(json.dumps(manifest))
     problems = validate_bundle(bundle)
     assert any("must match" in p and "Table 1 | fleet" in p for p in problems)
+
+
+def test_an_exhibit_label_of_punctuation_alone_is_rejected(tmp_path):
+    """The half of the rule the label check skipped from the first commit.
+
+    A label is not a directory, so it cannot traverse the way an id can:
+    it always takes a suffix and stays a leaf. But it is the token text.md
+    cites and the token a consumer asks for an exhibit by, and "-" is not
+    a name. The crop sits on disk under the offending stem, so the
+    cross-check has nothing to say and the label is all that is left to
+    object to.
+    """
+    bundle = make_bundle(tmp_path / "b")
+    (bundle / "figures").mkdir(exist_ok=True)
+    (bundle / "figures" / "-.png").write_bytes(PNG_STUB)
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    manifest["exhibits"] = [{"label": "-", "caption": "T1."}]
+    (bundle / "manifest.json").write_text(json.dumps(manifest))
+    problems = validate_bundle(bundle)
+    assert any("at least one letter or digit" in p for p in problems), problems
+
+
+@pytest.mark.parametrize("value", [
+    "table_01", "demo.001", "a-b", "_x1", "1234",
+    ".", "..", "-", "___", "has space", "a/b", "fig\n01", "",
+])
+def test_the_two_shapes_of_the_name_rule_agree(value):
+    """One rule asked twice: as a boolean before, as a problem after.
+
+    `is_filename_safe` is what the producing side asks before it stages a
+    name and `_name_problem` is what the validator reports afterwards, so
+    a name one accepts and the other refuses is a conversion that passes
+    staging and fails gate 1. They are two functions because only the
+    second has to say which half failed, and this is what holds them to
+    one answer.
+    """
+    problem = _name_problem(value, "name", "where", "because")
+    assert is_filename_safe(value) == (problem is None), (value, problem)
+
+
+def test_only_the_two_askers_reach_for_the_name_patterns():
+    """One rule in one place, and this is what keeps it there.
+
+    The gap this closed existed because three sites each matched the
+    patterns themselves and one of them matched only half of the rule. A
+    fourth name will arrive eventually; when it does it has to come
+    through `is_filename_safe` or `_name_problem` rather than reaching
+    for the regexes, and structure says so here rather than a reviewer
+    having to notice.
+    """
+    tree = ast.parse((REPO_ROOT / "src" / "alteksto" / "bundle.py").read_text())
+    patterns = {"_NAME_PATTERN", "_NAME_ALNUM"}
+    users = {node.name for node in ast.walk(tree)
+             if isinstance(node, ast.FunctionDef)
+             and any(isinstance(inner, ast.Name) and inner.id in patterns
+                     for inner in ast.walk(node))}
+    assert users == {"is_filename_safe", "_name_problem"}, users
 
 
 def test_a_dotted_id_with_an_alphanumeric_is_allowed(tmp_path):

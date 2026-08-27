@@ -81,8 +81,11 @@ and optionally `notes` (non-empty string when present). No other keys.
 
 - `label` is the stem of the exhibit's `figures/<label>.png`, of its
   `tables/<label>.html` where it has one, and the token consumers cite
-  when pointing at the image, so it obeys the same filename-safe pattern
-  as the id and must be unique within the bundle.
+  when pointing at the image, so it obeys the whole of the id's rule,
+  pattern and at least one letter or digit both, and must be unique
+  within the bundle. It takes a suffix and stays a leaf, so it cannot
+  traverse the way an id can; the second half is there because a label
+  of punctuation alone is not a token anything can cite.
 - `caption` is the exhibit's caption as the paper prints it.
 - `notes` is the exhibit's printed footnote text, plain. The crop
   includes the footnote lines as printed (they are part of the

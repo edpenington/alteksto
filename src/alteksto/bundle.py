@@ -152,6 +152,28 @@ def is_filename_safe(value) -> bool:
                 and _NAME_ALNUM.search(value))
 
 
+def _name_problem(value, what, where, because):
+    """The rule `is_filename_safe` asks as a boolean, asked as a problem.
+
+    Every name that becomes a path comes here, so that a name cannot be
+    given half the rule by the site that checks it. That is not
+    hypothetical: an exhibit label went without the second half from the
+    first commit until it was noticed, because each of the three sites
+    spelled the rule out for itself.
+
+    `what` and `where` locate the name for its reader, and `because` says
+    what this particular name is for, so a producer reading the problem
+    knows why the rule is there. None when the name is legal.
+    """
+    if not _NAME_PATTERN.match(value):
+        return f"{where} {what} {value!r} {_NAME_RULE}: {because}"
+    if not _NAME_ALNUM.search(value):
+        return (f"{where} {what} {value!r} must contain at least one letter "
+                f"or digit: punctuation alone is not a name, and '.' and "
+                f"'..' resolve to real directories")
+    return None
+
+
 def _is_int(value) -> bool:
     """True for a genuine JSON integer. Rejects bool (a Python int
     subclass) so `schema_version: true` does not sneak through."""
@@ -298,15 +320,11 @@ def _validate_manifest(root: Path):
                 problems.append(f"manifest.json key {name!r} must be a "
                                 f"non-empty string")
             if name == "id" and value.strip():
-                if not _NAME_PATTERN.match(value):
-                    problems.append(
-                        f"manifest.json id {value!r} {_NAME_RULE}")
-                elif not _NAME_ALNUM.search(value):
-                    problems.append(
-                        f"manifest.json id {value!r} must contain at least "
-                        f"one letter or digit; ids like '.' or '..' are "
-                        f"rejected because the id is used directly as a "
-                        f"filesystem path component")
+                problem = _name_problem(
+                    value, "id", "manifest.json",
+                    "it is used directly as a filesystem path component")
+                if problem:
+                    problems.append(problem)
     manifest_id = data.get("id")
     if not isinstance(manifest_id, str):
         manifest_id = None
@@ -470,10 +488,12 @@ def _validate_exhibits(value, where="manifest.json"):
         label = entry.get("label")
         if not isinstance(label, str) or not label.strip():
             continue
-        if not _NAME_PATTERN.match(label):
-            problems.append(
-                f"{where} label {label!r} {_NAME_RULE}: it is the stem of a "
-                f"figures/*.png file and the token consumers cite")
+        problem = _name_problem(
+            label, "label", where,
+            "it is the stem of a figures/*.png file and the token "
+            "consumers cite")
+        if problem:
+            problems.append(problem)
             continue
         if label in seen:
             problems.append(f"{where} label {label!r} is declared more than "
@@ -1181,21 +1201,16 @@ def _validate_supplement_entries(value, problems):
         name = entry.get("name")
         if not isinstance(name, str) or not name.strip():
             continue
-        if not _NAME_PATTERN.match(name):
-            problems.append(
-                f"{where} name {name!r} {_NAME_RULE}: it names a "
-                f"supplements/ directory and is the token a consumer asks "
-                f"for a supplement by")
-            malformed = True
-            continue
-        if not _NAME_ALNUM.search(name):
-            # Without this, a supplement named ".." sends every check
-            # below to the bundle root, where it reads the article's own
-            # figures and reports them as a supplement's undeclared files.
-            problems.append(
-                f"{where} name {name!r} must contain at least one letter or "
-                f"digit; names like '.' or '..' are rejected because the "
-                f"name is used directly as a filesystem path component")
+        # The sharpest case of the rule's second half: named "..", a
+        # supplement would send every check below to the bundle root, where
+        # it reads the article's own figures and reports them as this
+        # supplement's undeclared files.
+        problem = _name_problem(
+            name, "name", where,
+            "it names a supplements/ directory and is the token a consumer "
+            "asks for a supplement by")
+        if problem:
+            problems.append(problem)
             malformed = True
             continue
         if name in declared:

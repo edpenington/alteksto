@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from alteksto.bundle import SCHEMA_VERSION, validate_bundle
+from alteksto.bundle import SCHEMA_VERSION, bundle_problems
 from tests.engines.walk.support import load_tool
 
 PNG_STUB = b"\x89PNG\r\n\x1a\n invented bytes; no check reads pixels"
@@ -70,7 +70,7 @@ def test_it_assembles_what_the_format_accepts(assemble_tool, tmp_path):
     assert assemble_tool.main([str(work), "--bundle", str(bundle)]) == 0
     # The point of the tool: what it wrote is a valid bundle, judged by the
     # contract rather than by reading the JSON back and agreeing with it.
-    assert validate_bundle(bundle) == []
+    assert bundle_problems(bundle) == []
 
 
 def test_the_id_comes_from_the_manifest_and_cannot_disagree(assemble_tool,

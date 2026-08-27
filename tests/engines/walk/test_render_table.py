@@ -109,7 +109,8 @@ def test_a_holed_grid_is_refused_with_its_position(render_table_tool,
     out = tmp_path / "holed.png"
     assert render_table_tool.main([str(source), "--out", str(out)]) == 1
     assert not out.exists()
-    assert "leaves row 1 column 1 uncovered" in capsys.readouterr().err
+    assert ("leaves row 2 column 2 (counted from 1, thead rows included) "
+            "uncovered" in capsys.readouterr().err)
 
 
 def test_a_missing_source_is_a_loud_failure(render_table_tool, tmp_path,

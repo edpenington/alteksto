@@ -2,8 +2,9 @@
 """Validate one or more paper bundles against docs/bundle.md.
 
 Prints every problem for every bundle named, and exits nonzero if any
-bundle is invalid. Gate 1 of the route runs this in a loop until it
-passes clean.
+bundle is invalid. A converter runs this in a loop until it passes
+clean; what its own stages are called is the converter's business, not
+the format's.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from alteksto.bundle import validate_bundle
+from alteksto.bundle import bundle_problems
 
 
 def main(argv=None) -> int:
@@ -27,7 +28,7 @@ def main(argv=None) -> int:
 
     failed = 0
     for bundle in args.bundles:
-        problems = validate_bundle(bundle)
+        problems = bundle_problems(bundle)
         if problems:
             failed += 1
             for problem in problems:

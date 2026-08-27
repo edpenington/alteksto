@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from alteksto.bundle import SCHEMA_VERSION, validate_table_html
+from alteksto.bundle import SCHEMA_VERSION, table_html_problems
 from tests.engines.walk.support import WALK_EXAMPLE, load_tool
 # The shared example, and the validator, belong to the format rather than
 # to this engine.
@@ -409,7 +409,7 @@ def test_the_table_transcription_is_the_printed_table():
     """
     markup = (EXPECTED / "bundle" / "tables" / "table_01.html").read_text(
         encoding="utf-8")
-    assert validate_table_html(markup, "table_01.html") == []
+    assert table_html_problems(markup, "table_01.html") == []
     header = "".join(f'<th scope="col">{cell}</th>'
                      for cell in builder.TABLE_HEADER)
     body = "".join("<tr>" + "".join(f"<td>{cell}</td>" for cell in row)
@@ -455,7 +455,7 @@ def test_the_supplement_transcription_is_its_printed_table():
     markup = (EXPECTED / "bundle" / "supplements" / "supplement_a" /
               "tables" / "supplement_a_table_01.html").read_text(
                   encoding="utf-8")
-    assert validate_table_html(markup, "supplement_a_table_01.html") == []
+    assert table_html_problems(markup, "supplement_a_table_01.html") == []
     groups = "".join(f'<th colspan="2" scope="colgroup">{name}</th>'
                      for name in builder.SUPPLEMENT_GROUPS)
     # Cut and Uncut once under each group, which is the second header row.

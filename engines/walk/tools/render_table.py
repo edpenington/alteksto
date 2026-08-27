@@ -22,7 +22,7 @@ transcription itself is always written in reading order, whichever way the
 page prints it. Pass the rotation the crop has, not the one it needs.
 
 The transcription is checked before it is drawn, by the format's own rule
-(`alteksto.bundle.validate_table_html`) and not by a second opinion formed
+(`alteksto.bundle.table_html_problems`) and not by a second opinion formed
 here. Nothing is written when it does not pass, and every problem is
 printed. This is the order the checks are meant to run in: structure is
 settled deterministically first, and only a transcription that tiles its
@@ -41,7 +41,7 @@ from pathlib import Path
 
 import pymupdf
 
-from alteksto.bundle import validate_table_html
+from alteksto.bundle import table_html_problems
 
 # The layout the comparison always uses. Borders on every cell because cell
 # boundaries are exactly what is being checked, and a header that is visibly
@@ -202,7 +202,7 @@ def main(argv=None) -> int:
         print(f"render-table: could not read {args.source}: {exc}",
               file=sys.stderr)
         return 1
-    problems = validate_table_html(source, str(args.source))
+    problems = table_html_problems(source, str(args.source))
     if problems:
         for problem in problems:
             print(f"render-table: {problem}", file=sys.stderr)

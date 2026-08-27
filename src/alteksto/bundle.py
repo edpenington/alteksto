@@ -4,7 +4,7 @@ This repository owns the bundle format; the specification lives in
 docs/bundle.md and this module is its enforcement. Consumers of the
 format (e.g. *meltiro*, *forfiltri*) accept what passes here.
 
-`validate_bundle(path)` returns EVERY problem as a list of strings; an
+`bundle_problems(path)` returns EVERY problem as a list of strings; an
 empty list means the bundle is valid. Nothing is raised for a malformed
 bundle, so a caller can report all problems at once.
 
@@ -13,7 +13,7 @@ the directory: which files in it are exhibits, and what each is called.
 That is a rule of the format too, so it is answered here rather than
 reimplemented by every reader. `table_files(path)` answers the same
 question of `tables/`, the transcriptions an exhibit may carry beside its
-crop, and `validate_table_html(source, where)` is what one of those files
+crop, and `table_html_problems(source, where)` is what one of those files
 has to be. That last one is public because the producing side needs it
 too: a tool that renders a transcription refuses the same files this
 refuses, rather than forming its own opinion of what a table is.
@@ -174,7 +174,7 @@ def _is_int(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def validate_bundle(path) -> list[str]:
+def bundle_problems(path) -> list[str]:
     """Return a list of ALL problems with the bundle at path.
 
     Empty list means valid. Never raises for a malformed bundle.
@@ -269,7 +269,7 @@ def _validate_manifest(root: Path):
         # out of it, but the parse runs first and json's scanner recurses in
         # C, at a depth that is a property of the interpreter rather than of
         # this format: 3.11 gives up where later versions keep going. Either
-        # way validate_bundle answers with a problem, because it never
+        # way bundle_problems answers with a problem, because it never
         # raises for a malformed bundle, and a manifest this deep is
         # malformed whatever the parser makes of it.
         return ["manifest.json is nested too deeply to parse; a manifest is "
@@ -415,7 +415,7 @@ def _walk_objects(root, where: str):
     the manifest itself, `manifest.json exhibits[3]` for an exhibit entry.
     The walk carries its own queue rather than recursing, so a manifest
     nested deeply enough to exhaust the interpreter's stack is still a
-    reported problem and not an exception out of validate_bundle. Breadth
+    reported problem and not an exception out of bundle_problems. Breadth
     first, which for the shapes this format allows is the order the file
     reads.
     """
@@ -543,7 +543,7 @@ def figure_files(root) -> dict[str, Path]:
     disagree about a case-varying suffix or a dotfile, and the consumer's
     would win, putting a label in front of a reader that no check ever saw.
 
-    It reports nothing and refuses nothing. A stray file is validate_bundle's
+    It reports nothing and refuses nothing. A stray file is for bundle_problems
     to reject; a missing figures/ is the no-images case, and the manifest's
     exhibits is what says whether that is correct. The ordering is by label
     rather than by directory order, so one bundle enumerates identically on
@@ -625,7 +625,7 @@ def _validate_tables(root: Path, prefix: str = ""):
         except (OSError, UnicodeDecodeError) as exc:
             problems.append(f"{where} could not be read as UTF-8: {exc}")
             continue
-        problems.extend(validate_table_html(source, where))
+        problems.extend(table_html_problems(source, where))
     return problems, list(transcriptions)
 
 
@@ -651,7 +651,7 @@ def _cross_check_tables(declared_labels, transcribed_labels, prefix="",
     ]
 
 
-def validate_table_html(source: str, where: str) -> list[str]:
+def table_html_problems(source: str, where: str) -> list[str]:
     """Every problem with one transcription's markup and structure.
 
     Two questions are asked, and the second is the one worth the machinery.

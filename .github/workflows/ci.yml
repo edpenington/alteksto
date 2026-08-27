@@ -69,7 +69,7 @@ jobs:
           import json, pathlib, sys
           from alteksto.bundle import (SCHEMA_VERSION, figure_files,
                                        supplement_dirs, table_files,
-                                       validate_bundle)
+                                       bundle_problems)
           root = pathlib.Path("bundle")
           (root / "figures").mkdir(parents=True)
           (root / "tables").mkdir(parents=True)
@@ -105,7 +105,7 @@ jobs:
                                "exhibits": [{"label": "appendix_a_table_01",
                                              "caption": "A table."}]}],
           }))
-          assert validate_bundle(root) == [], validate_bundle(root)
+          assert bundle_problems(root) == [], bundle_problems(root)
           assert list(figure_files(root)) == ["table_01"]
           assert list(table_files(root)) == ["table_01"]
           assert list(supplement_dirs(root)) == ["appendix_a"]
@@ -116,14 +116,14 @@ jobs:
                                "exhibits": [{"label": "table_01",
                                              "caption": "A clash."}]}],
           }))
-          assert any("already declares" in p for p in validate_bundle(root))
+          assert any("already declares" in p for p in bundle_problems(root))
           (root / "supplements.json").unlink()
           import shutil; shutil.rmtree(root / "supplements")
           # And the grid check refuses a dropped cell with no parser installed.
           (root / "tables" / "table_01.html").write_text(
               "<table><tr><th>a</th><th>b</th></tr>"
               "<tr><td>only one</td></tr></table>")
-          assert any("uncovered" in p for p in validate_bundle(root))
+          assert any("uncovered" in p for p in bundle_problems(root))
           assert "pymupdf" not in sys.modules
           assert "lxml" not in sys.modules
           print("ok: the contract holds on the standard library alone")

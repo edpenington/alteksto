@@ -16,7 +16,7 @@ import pytest
 
 from alteksto.bundle import (SCHEMA_VERSION, _walk_objects, figure_files,
                              name_problem, supplement_dirs, table_files,
-                             validate_bundle, validate_table_html)
+                             bundle_problems, table_html_problems)
 from tests.support import REPO_ROOT, load_script
 
 
@@ -65,23 +65,23 @@ def make_bundle(root, *, manifest=None, text="# An invented paper\n\nBody.",
 
 
 def test_a_minimal_bundle_is_valid(tmp_path):
-    assert validate_bundle(make_bundle(tmp_path / "b")) == []
+    assert bundle_problems(make_bundle(tmp_path / "b")) == []
 
 
 def test_a_bundle_with_exhibits_is_valid(tmp_path):
     bundle = make_bundle(tmp_path / "b", figures=("table_01", "figure_01"))
-    assert validate_bundle(bundle) == []
+    assert bundle_problems(bundle) == []
 
 
 def test_a_missing_directory_is_one_problem(tmp_path):
-    problems = validate_bundle(tmp_path / "absent")
+    problems = bundle_problems(tmp_path / "absent")
     assert len(problems) == 1 and "does not exist" in problems[0]
 
 
 def test_missing_manifest_and_text_both_reported(tmp_path):
     root = tmp_path / "b"
     root.mkdir()
-    problems = validate_bundle(root)
+    problems = bundle_problems(root)
     assert any("manifest.json is missing" in p for p in problems)
     assert any("text.md is missing" in p for p in problems)
 
@@ -92,7 +92,7 @@ def test_unknown_manifest_key_rejected(tmp_path):
     manifest["provenance"] = "not allowed"
     (bundle / "manifest.json").write_text(json.dumps(manifest))
     assert any("unknown key: 'provenance'" in p
-               for p in validate_bundle(bundle))
+               for p in bundle_problems(bundle))
 
 
 def test_schema_version_must_be_the_format_s_own_and_not_bool(tmp_path):
@@ -101,10 +101,10 @@ def test_schema_version_must_be_the_format_s_own_and_not_bool(tmp_path):
     manifest["schema_version"] = SCHEMA_VERSION - 1
     (bundle / "manifest.json").write_text(json.dumps(manifest))
     assert any(f"schema_version must be {SCHEMA_VERSION}" in p
-               for p in validate_bundle(bundle))
+               for p in bundle_problems(bundle))
     manifest["schema_version"] = True
     (bundle / "manifest.json").write_text(json.dumps(manifest))
-    assert any("must be an integer" in p for p in validate_bundle(bundle))
+    assert any("must be an integer" in p for p in bundle_problems(bundle))
 
 
 @pytest.mark.parametrize("bad_id, expected", [
@@ -118,7 +118,7 @@ def test_bad_ids_are_rejected(tmp_path, bad_id, expected):
     manifest = json.loads((bundle / "manifest.json").read_text())
     manifest["id"] = bad_id
     (bundle / "manifest.json").write_text(json.dumps(manifest))
-    assert any(expected in p for p in validate_bundle(bundle))
+    assert any(expected in p for p in bundle_problems(bundle))
 
 
 @pytest.mark.parametrize("key", ["schema_version", "id", "title", "exhibits"])
@@ -136,7 +136,7 @@ def test_every_required_manifest_key_is_required(tmp_path, key):
     del manifest[key]
     (bundle / "manifest.json").write_text(json.dumps(manifest))
     assert any(f"missing required key: '{key}'" in p
-               for p in validate_bundle(bundle))
+               for p in bundle_problems(bundle))
 
 
 def test_an_exhibit_entry_needs_a_label(tmp_path):
@@ -146,7 +146,7 @@ def test_an_exhibit_entry_needs_a_label(tmp_path):
     manifest["exhibits"] = [{"caption": "Table 1."}]
     (bundle / "manifest.json").write_text(json.dumps(manifest))
     assert any("missing required key: 'label'" in p
-               for p in validate_bundle(bundle))
+               for p in bundle_problems(bundle))
 
 
 @pytest.mark.parametrize("key, value, expected", [
@@ -164,7 +164,7 @@ def test_a_present_value_is_still_typed(tmp_path, key, value, expected):
     manifest = json.loads((bundle / "manifest.json").read_text())
     manifest[key] = value
     (bundle / "manifest.json").write_text(json.dumps(manifest))
-    assert any(key in p and expected in p for p in validate_bundle(bundle))
+    assert any(key in p and expected in p for p in bundle_problems(bundle))
 
 
 def test_an_exhibit_label_is_filename_and_citation_safe(tmp_path):
@@ -181,7 +181,7 @@ def test_an_exhibit_label_is_filename_and_citation_safe(tmp_path):
     manifest = json.loads((bundle / "manifest.json").read_text())
     manifest["exhibits"] = [{"label": "Table 1 | fleet", "caption": "T1."}]
     (bundle / "manifest.json").write_text(json.dumps(manifest))
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("must match" in p and "Table 1 | fleet" in p for p in problems)
 
 
@@ -201,7 +201,7 @@ def test_an_exhibit_label_of_punctuation_alone_is_rejected(tmp_path):
     manifest = json.loads((bundle / "manifest.json").read_text())
     manifest["exhibits"] = [{"label": "-", "caption": "T1."}]
     (bundle / "manifest.json").write_text(json.dumps(manifest))
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("at least one letter or digit" in p for p in problems), problems
 
 
@@ -261,7 +261,7 @@ def test_a_dotted_id_with_an_alphanumeric_is_allowed(tmp_path):
     manifest = json.loads((bundle / "manifest.json").read_text())
     manifest["id"] = "demo.001"
     (bundle / "manifest.json").write_text(json.dumps(manifest))
-    assert validate_bundle(bundle) == []
+    assert bundle_problems(bundle) == []
 
 
 @pytest.mark.parametrize("entry, expected", [
@@ -275,7 +275,7 @@ def test_an_exhibit_entry_carries_non_empty_strings(tmp_path, entry, expected):
     manifest = json.loads((bundle / "manifest.json").read_text())
     manifest["exhibits"] = [entry]
     (bundle / "manifest.json").write_text(json.dumps(manifest))
-    assert any(expected in p for p in validate_bundle(bundle))
+    assert any(expected in p for p in bundle_problems(bundle))
 
 
 @pytest.mark.parametrize("exhibits, expected", [
@@ -287,7 +287,7 @@ def test_exhibits_is_a_list_of_objects(tmp_path, exhibits, expected):
     manifest = json.loads((bundle / "manifest.json").read_text())
     manifest["exhibits"] = exhibits
     (bundle / "manifest.json").write_text(json.dumps(manifest))
-    assert any(expected in p for p in validate_bundle(bundle))
+    assert any(expected in p for p in bundle_problems(bundle))
 
 
 def test_a_malformed_exhibits_block_is_not_cross_checked(tmp_path):
@@ -298,7 +298,7 @@ def test_a_malformed_exhibits_block_is_not_cross_checked(tmp_path):
     manifest = json.loads((bundle / "manifest.json").read_text())
     manifest["exhibits"] = [{"label": "table_01"}]
     (bundle / "manifest.json").write_text(json.dumps(manifest))
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("missing required key: 'caption'" in p for p in problems)
     assert not any("not declared" in p for p in problems)
 
@@ -314,7 +314,7 @@ def test_a_manifest_that_is_not_an_object_is_one_problem(tmp_path, raw,
     # come back as a problem rather than as an exception out of the parse.
     bundle = make_bundle(tmp_path / "b")
     (bundle / "manifest.json").write_text(raw, encoding="utf-8")
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert len(problems) == 1 and expected in problems[0]
 
 
@@ -328,7 +328,7 @@ def test_a_duplicated_manifest_key_is_rejected(tmp_path):
         f'{{"schema_version": {SCHEMA_VERSION}, '
         f'"id": "inv-01", "title": "An invented paper", '
         '"id": "inv-02", "exhibits": []}', encoding="utf-8")
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert len(problems) == 1
     assert "manifest.json has a duplicate key: 'id'" in problems[0]
 
@@ -342,7 +342,7 @@ def test_a_duplicated_key_inside_an_exhibit_is_located(tmp_path):
         f'"id": "inv-01", "title": "An invented paper", '
         '"exhibits": [{"label": "table_01", "caption": "Herons at dawn", '
         '"caption": "Herons at dusk"}]}', encoding="utf-8")
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert len(problems) == 1
     assert ("manifest.json exhibits[0] has a duplicate key: 'caption'"
             in problems[0])
@@ -367,7 +367,7 @@ def test_every_duplicate_is_named_and_the_rest_is_still_checked(tmp_path):
         '"id": "inv-03", "warden": "not a manifest key", '
         '"exhibits": [{"label": "table_01", "caption": "Herons at dawn", '
         '"caption": "Herons at dusk"}]}', encoding="utf-8")
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     named = [p for p in problems if "duplicate key" in p]
     assert len(named) == 2
     assert "manifest.json has a duplicate key: 'id'" in named[0]
@@ -389,7 +389,7 @@ def test_a_repeated_key_is_not_confused_with_a_repeated_value(tmp_path):
         {"label": "table_02", "caption": "Heron counts by reed bed"},
     ]
     (bundle / "manifest.json").write_text(json.dumps(manifest))
-    assert validate_bundle(bundle) == []
+    assert bundle_problems(bundle) == []
 
 
 def _deeply_nested_manifest(root, depth):
@@ -407,7 +407,7 @@ def test_the_walk_carries_its_own_queue_rather_than_the_stack():
     """Depth costs the walk nothing, which is why it has a queue.
 
     Asked of `_walk_objects` directly and on a structure built in Python
-    rather than parsed, because through `validate_bundle` the question
+    rather than parsed, because through `bundle_problems` the question
     cannot be asked at all: json's scanner is itself bounded by the
     recursion limit on some supported interpreters, so a manifest deeper
     than that limit never reaches the walk, and raising the limit to get
@@ -426,7 +426,7 @@ def test_the_walk_carries_its_own_queue_rather_than_the_stack():
 
 def test_a_duplicate_is_located_inside_a_nested_manifest(tmp_path):
     bundle = _deeply_nested_manifest(tmp_path / "b", 50)
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("duplicate key: 'id'" in p for p in problems)
 
 
@@ -439,7 +439,7 @@ def test_a_manifest_too_deep_for_the_parser_reports_rather_than_raises(
     # depends on whether the parse finished, and the duplicate can only be
     # named when it did.
     bundle = _deeply_nested_manifest(tmp_path / "b", 5000)
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert problems
     assert any("duplicate key: 'id'" in p or "nested too deeply" in p
                for p in problems), problems
@@ -453,17 +453,17 @@ def test_exhibit_entries_take_label_caption_and_optional_notes(tmp_path):
                              "notes": "Invented footnote: counts exclude "
                                       "the pilot pond."}]
     (bundle / "manifest.json").write_text(json.dumps(manifest))
-    assert validate_bundle(bundle) == []
+    assert bundle_problems(bundle) == []
     manifest["exhibits"] = [{"label": "table_01",
                              "caption": "Caption",
                              "footnote": "not allowed"}]
     (bundle / "manifest.json").write_text(json.dumps(manifest))
     assert any("unknown key: 'footnote'" in p
-               for p in validate_bundle(bundle))
+               for p in bundle_problems(bundle))
     manifest["exhibits"] = [{"label": "table_01"}]
     (bundle / "manifest.json").write_text(json.dumps(manifest))
     assert any("missing required key: 'caption'" in p
-               for p in validate_bundle(bundle))
+               for p in bundle_problems(bundle))
 
 
 def test_empty_notes_is_a_mistake_not_a_signal(tmp_path):
@@ -473,7 +473,7 @@ def test_empty_notes_is_a_mistake_not_a_signal(tmp_path):
                              "notes": "   "}]
     (bundle / "manifest.json").write_text(json.dumps(manifest))
     assert any("'notes' must be a non-empty string" in p
-               for p in validate_bundle(bundle))
+               for p in bundle_problems(bundle))
 
 
 def test_duplicate_labels_are_rejected(tmp_path):
@@ -484,12 +484,12 @@ def test_duplicate_labels_are_rejected(tmp_path):
         {"label": "table_01", "caption": "Second"},
     ]
     (bundle / "manifest.json").write_text(json.dumps(manifest))
-    assert any("more than once" in p for p in validate_bundle(bundle))
+    assert any("more than once" in p for p in bundle_problems(bundle))
 
 
 def test_empty_text_md_is_invalid(tmp_path):
     bundle = make_bundle(tmp_path / "b", text="   \n")
-    assert any("text.md is empty" in p for p in validate_bundle(bundle))
+    assert any("text.md is empty" in p for p in bundle_problems(bundle))
 
 
 def test_cross_check_both_directions(tmp_path):
@@ -497,20 +497,20 @@ def test_cross_check_both_directions(tmp_path):
     bundle = make_bundle(tmp_path / "declared", figures=("table_01",))
     (bundle / "figures" / "table_01.png").unlink()
     assert any("no figures/table_01.png" in p
-               for p in validate_bundle(bundle))
+               for p in bundle_problems(bundle))
     # PNG but not declared.
     bundle2 = make_bundle(tmp_path / "stray")
     (bundle2 / "figures").mkdir()
     (bundle2 / "figures" / "figure_09.png").write_bytes(PNG_STUB)
     assert any("figure_09.png is not declared" in p
-               for p in validate_bundle(bundle2))
+               for p in bundle_problems(bundle2))
 
 
 def test_figures_rejects_non_png_and_subdirs(tmp_path):
     bundle = make_bundle(tmp_path / "b", figures=("table_01",))
     (bundle / "figures" / "notes.txt").write_text("stray")
     (bundle / "figures" / "sub").mkdir()
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("non-png" in p for p in problems)
     assert any("subdirectory" in p for p in problems)
 
@@ -518,13 +518,13 @@ def test_figures_rejects_non_png_and_subdirs(tmp_path):
 def test_hidden_files_in_figures_are_ignored(tmp_path):
     bundle = make_bundle(tmp_path / "b", figures=("table_01",))
     (bundle / "figures" / ".DS_Store").write_bytes(b"junk")
-    assert validate_bundle(bundle) == []
+    assert bundle_problems(bundle) == []
 
 
 def test_extra_files_beside_the_contract_are_ignored(tmp_path):
     bundle = make_bundle(tmp_path / "b")
     (bundle / "paperwork.txt").write_text("allowed")
-    assert validate_bundle(bundle) == []
+    assert bundle_problems(bundle) == []
 
 
 class TestFigureFiles:
@@ -543,7 +543,7 @@ class TestFigureFiles:
         # check ever saw.
         bundle = make_bundle(tmp_path / "b", figures=("table_01",))
         (bundle / "figures" / ".DS_Store").write_bytes(b"junk")
-        assert validate_bundle(bundle) == []
+        assert bundle_problems(bundle) == []
         assert list(figure_files(bundle)) == ["table_01"]
 
     def test_no_figures_directory_is_no_crops(self, tmp_path):
@@ -552,12 +552,12 @@ class TestFigureFiles:
         assert figure_files(bundle) == {}
 
     def test_it_refuses_nothing_itself(self, tmp_path):
-        # A stray file is validate_bundle's to reject. This reports the
+        # A stray file is bundle_problems's to reject. This reports the
         # crops beside it rather than raising, so a caller that has already
         # taken the verdict gets what it came for.
         bundle = make_bundle(tmp_path / "b", figures=("table_01",))
         (bundle / "figures" / "notes.txt").write_text("x", encoding="utf-8")
-        assert any("non-png" in p for p in validate_bundle(bundle))
+        assert any("non-png" in p for p in bundle_problems(bundle))
         assert list(figure_files(bundle)) == ["table_01"]
 
     def test_a_png_suffix_is_read_case_insensitively(self, tmp_path):
@@ -570,7 +570,7 @@ class TestFigureFiles:
         data = crop.read_bytes()
         crop.unlink()
         (bundle / "figures" / "table_01.PNG").write_bytes(data)
-        assert validate_bundle(bundle) == []
+        assert bundle_problems(bundle) == []
         assert list(figure_files(bundle)) == ["table_01"]
 
 
@@ -621,7 +621,7 @@ CORRECT_TABLES = {
 def test_a_correct_transcription_passes_clean(tmp_path, shape):
     bundle = make_bundle(tmp_path / "b", figures=("table_01",),
                          tables={"table_01": CORRECT_TABLES[shape]})
-    assert validate_bundle(bundle) == []
+    assert bundle_problems(bundle) == []
 
 
 @pytest.mark.parametrize("markup, expected", [
@@ -701,7 +701,7 @@ def test_a_correct_transcription_passes_clean(tmp_path, shape):
 def test_a_broken_transcription_is_named(tmp_path, markup, expected):
     bundle = make_bundle(tmp_path / "b", figures=("table_01",),
                          tables={"table_01": markup})
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any(expected in problem for problem in problems), problems
     assert all(problem.startswith("tables/table_01.html")
                for problem in problems), problems
@@ -710,7 +710,7 @@ def test_a_broken_transcription_is_named(tmp_path, markup, expected):
 def test_an_empty_transcription_is_not_a_transcription(tmp_path):
     bundle = make_bundle(tmp_path / "b", figures=("table_01",),
                          tables={"table_01": "   \n"})
-    assert any("is empty" in p for p in validate_bundle(bundle))
+    assert any("is empty" in p for p in bundle_problems(bundle))
 
 
 def test_a_holed_grid_reports_its_position_and_stops_counting(tmp_path):
@@ -721,7 +721,7 @@ def test_a_holed_grid_reports_its_position_and_stops_counting(tmp_path):
     """
     rows = "".join("<tr><td>a</td></tr>" for _ in range(12))
     markup = f'<table><tr><th colspan="2">Wide</th></tr>{rows}</table>'
-    problems = validate_bundle(make_bundle(tmp_path / "b",
+    problems = bundle_problems(make_bundle(tmp_path / "b",
                                            figures=("table_01",),
                                            tables={"table_01": markup}))
     named = [p for p in problems if "uncovered" in p and "further" not in p]
@@ -734,12 +734,12 @@ def test_a_transcription_is_optional_exhibit_by_exhibit(tmp_path):
     bundle = make_bundle(tmp_path / "b",
                          figures=("table_01", "figure_01"),
                          tables={"table_01": TABLE_STUB})
-    assert validate_bundle(bundle) == []
+    assert bundle_problems(bundle) == []
 
 
 def test_a_bundle_may_transcribe_nothing(tmp_path):
     bundle = make_bundle(tmp_path / "b", figures=("table_01",))
-    assert validate_bundle(bundle) == []
+    assert bundle_problems(bundle) == []
     assert table_files(bundle) == {}
 
 
@@ -747,7 +747,7 @@ def test_a_transcription_needs_a_declared_exhibit(tmp_path):
     bundle = make_bundle(tmp_path / "b", figures=("table_01",),
                          tables={"table_01": TABLE_STUB,
                                  "table_09": TABLE_STUB})
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("tables/table_09.html is not declared" in p
                for p in problems), problems
     assert not any("table_01" in p for p in problems), problems
@@ -764,7 +764,7 @@ def test_a_transcription_never_stands_in_for_a_crop(tmp_path):
     manifest["exhibits"] = [{"label": "table_01", "caption": "A table."}]
     (bundle / "manifest.json").write_text(json.dumps(manifest))
     assert any("there is no figures/table_01.png" in p
-               for p in validate_bundle(bundle))
+               for p in bundle_problems(bundle))
 
 
 def test_tables_rejects_non_html_and_subdirs(tmp_path):
@@ -772,7 +772,7 @@ def test_tables_rejects_non_html_and_subdirs(tmp_path):
                          tables={"table_01": TABLE_STUB})
     (bundle / "tables" / "notes.txt").write_text("stray", encoding="utf-8")
     (bundle / "tables" / "old").mkdir()
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("contains a non-html file" in p for p in problems), problems
     assert any("contains a subdirectory" in p for p in problems), problems
 
@@ -781,13 +781,13 @@ def test_hidden_files_in_tables_are_ignored(tmp_path):
     bundle = make_bundle(tmp_path / "b", figures=("table_01",),
                          tables={"table_01": TABLE_STUB})
     (bundle / "tables" / ".DS_Store").write_bytes(b"\x00")
-    assert validate_bundle(bundle) == []
+    assert bundle_problems(bundle) == []
 
 
 def test_tables_that_is_not_a_directory_is_one_problem(tmp_path):
     bundle = make_bundle(tmp_path / "b", figures=("table_01",))
     (bundle / "tables").write_text("not a directory", encoding="utf-8")
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("tables exists but is not a directory" in p
                for p in problems), problems
 
@@ -797,7 +797,7 @@ def test_a_transcription_must_be_utf8(tmp_path):
                          tables={"table_01": TABLE_STUB})
     (bundle / "tables" / "table_01.html").write_bytes(b"<table>\xff</table>")
     assert any("could not be read as UTF-8" in p
-               for p in validate_bundle(bundle))
+               for p in bundle_problems(bundle))
 
 
 class TestTableFiles:
@@ -836,11 +836,11 @@ def test_a_rowspan_may_not_reach_past_the_last_row(tmp_path):
     printed = ("<table><tr><th>Season</th><th>n</th></tr>"
                "<tr><td>April</td><td>142</td></tr>"
                "<tr><td>July</td><td>88</td></tr></table>")
-    assert validate_table_html(printed, "t.html") == []
+    assert table_html_problems(printed, "t.html") == []
     hidden = ('<table><tr><th>Season</th><th>n</th></tr>'
               '<tr><td rowspan="2">April</td>'
               '<td rowspan="2">142</td></tr></table>')
-    problems = validate_table_html(hidden, "t.html")
+    problems = table_html_problems(hidden, "t.html")
     assert any("rowspan reaching row 2 when the table writes 2 rows" in p
                for p in problems), problems
 
@@ -850,7 +850,7 @@ def test_an_overhanging_rowspan_does_not_invent_rows_to_complain_about(
     """The diagnostics stay coherent: two rows written, two rows judged."""
     markup = ('<table><tr><td>a</td></tr>'
               '<tr><td rowspan="3">b</td><td>c</td></tr></table>')
-    problems = validate_table_html(markup, "t.html")
+    problems = table_html_problems(markup, "t.html")
     assert any("2 by 2 table" in p for p in problems), problems
     assert not any("row 3" in p for p in problems), problems
 
@@ -867,11 +867,11 @@ def test_an_empty_row_may_not_be_covered_by_a_widened_span(tmp_path):
     printed = ("<table><tr><th>Season</th><th>n</th></tr>"
                "<tr><td>April</td><td>142</td></tr>"
                "<tr><td>July</td><td>88</td></tr></table>")
-    assert validate_table_html(printed, "t.html") == []
+    assert table_html_problems(printed, "t.html") == []
     hidden = ('<table><tr><th>Season</th><th>n</th></tr>'
               '<tr><td rowspan="2">April</td><td rowspan="2">142</td></tr>'
               '<tr></tr></table>')
-    problems = validate_table_html(hidden, "t.html")
+    problems = table_html_problems(hidden, "t.html")
     assert any("writes no cells in row 2" in p for p in problems), problems
 
 
@@ -887,7 +887,7 @@ def test_the_occupancy_is_bounded_as_it_is_built(tmp_path):
               + '<td colspan="1000" rowspan="1000">x</td>' * 10
               + "</tr></table>")
     started = time.perf_counter()
-    problems = validate_table_html(markup, "t.html")
+    problems = table_html_problems(markup, "t.html")
     assert time.perf_counter() - started < 1.0
     assert any("claims more than 100000 cell positions" in p
                for p in problems), problems
@@ -905,7 +905,7 @@ def test_a_grid_beyond_the_limit_is_refused_cheaply(tmp_path):
     row = "<tr>" + '<td colspan="1000">x</td>' * 20 + "</tr>"
     markup = "<table>" + row * 30 + "</table>"
     started = time.perf_counter()
-    problems = validate_table_html(markup, "t.html")
+    problems = table_html_problems(markup, "t.html")
     assert time.perf_counter() - started < 2.0
     assert any("100000 cell positions" in p for p in problems), problems
 
@@ -915,7 +915,7 @@ def test_a_real_table_of_five_hundred_rows_is_not_near_the_limit(tmp_path):
               + "".join(f"<tr><td>Row {n}</td><td>{n}</td></tr>"
                         for n in range(500))
               + "</table>")
-    assert validate_table_html(markup, "t.html") == []
+    assert table_html_problems(markup, "t.html") == []
 
 
 def test_a_marked_section_is_refused_rather_than_dropped(tmp_path):
@@ -928,7 +928,7 @@ def test_a_marked_section_is_refused_rather_than_dropped(tmp_path):
     for markup in ("<table><tr><td>4.8<![CDATA[ hidden ]]></td>"
                    "<td>3.1</td></tr></table>",
                    "<table><tr><td>A<![CDATA[</td><td>]]>B</td></tr></table>"):
-        problems = validate_table_html(markup, "t.html")
+        problems = table_html_problems(markup, "t.html")
         assert any("marked section" in p for p in problems), (markup,
                                                               problems)
 
@@ -942,7 +942,7 @@ def test_a_span_that_is_not_an_ascii_number_is_refused(span):
     reads 1. Either way the grid validated is not the grid laid out.
     """
     markup = f'<table><tr><td colspan="{span}">a</td></tr></table>'
-    problems = validate_table_html(markup, "t.html")
+    problems = table_html_problems(markup, "t.html")
     assert any("a span is a positive whole number" in p
                for p in problems), problems
 
@@ -951,7 +951,7 @@ def test_a_bad_span_does_not_abort_the_rest_of_the_file():
     """The module promises every problem at once, so it owes them here."""
     markup = ('<table><tr><td colspan="²">a</td></tr>'
               '<tr><td style="x">b</td></tr></table>')
-    problems = validate_table_html(markup, "t.html")
+    problems = table_html_problems(markup, "t.html")
     assert any("a span is a positive whole number" in p for p in problems)
     assert any("the attribute 'style'" in p for p in problems), problems
 
@@ -962,10 +962,10 @@ def test_a_byte_order_mark_is_not_content(tmp_path):
     (bundle / "tables").mkdir()
     (bundle / "tables" / "table_01.html").write_text("﻿" + TABLE_STUB,
                                                      encoding="utf-8")
-    assert validate_bundle(bundle) == []
+    assert bundle_problems(bundle) == []
 
 
-def test_validate_table_html_is_the_rule_a_tool_can_reuse():
+def test_table_html_problems_is_the_rule_a_tool_can_reuse():
     """The transcription rule is public, and it is the same rule.
 
     An engine that draws a transcription refuses what the format refuses
@@ -973,8 +973,8 @@ def test_validate_table_html_is_the_rule_a_tool_can_reuse():
     is. If this ever stops being importable such a tool grows a second
     definition, which is the drift the function exists to prevent.
     """
-    assert validate_table_html(TABLE_STUB, "t.html") == []
-    problems = validate_table_html("<p>not a table</p>", "t.html")
+    assert table_html_problems(TABLE_STUB, "t.html") == []
+    problems = table_html_problems("<p>not a table</p>", "t.html")
     assert problems and all(p.startswith("t.html") for p in problems)
 
 
@@ -1020,7 +1020,7 @@ def test_a_bundle_with_a_supplement_is_valid(tmp_path):
                    tables={"supplement_3_table_01": TABLE_STUB})
     declare_supplements(bundle, [entry("supplement_3",
                                        ("supplement_3_table_01",))])
-    assert validate_bundle(bundle) == []
+    assert bundle_problems(bundle) == []
     assert list(supplement_dirs(bundle)) == ["supplement_3"]
 
 
@@ -1032,14 +1032,14 @@ def test_a_supplement_of_tables_alone_writes_no_text(tmp_path):
                    text=None)
     declare_supplements(bundle, [entry("appendix_a",
                                        ("appendix_a_table_01",))])
-    assert validate_bundle(bundle) == []
+    assert bundle_problems(bundle) == []
 
 
 def test_a_supplement_may_hold_no_exhibits(tmp_path):
     bundle = make_bundle(tmp_path / "b")
     add_supplement(bundle, "appendix_a")
     declare_supplements(bundle, [entry("appendix_a")])
-    assert validate_bundle(bundle) == []
+    assert bundle_problems(bundle) == []
 
 
 def test_two_supplements_are_ordinary(tmp_path):
@@ -1049,21 +1049,21 @@ def test_two_supplements_are_ordinary(tmp_path):
     declare_supplements(bundle, [entry("appendix_a"),
                                  entry("supplement_3",
                                        ("supplement_3_fig_01",))])
-    assert validate_bundle(bundle) == []
+    assert bundle_problems(bundle) == []
     assert list(supplement_dirs(bundle)) == ["appendix_a", "supplement_3"]
 
 
 def test_a_supplement_directory_needs_its_declaration(tmp_path):
     bundle = make_bundle(tmp_path / "b")
     add_supplement(bundle, "appendix_a")
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("there is no supplements.json" in p for p in problems), problems
 
 
 def test_a_declaration_needs_its_directory(tmp_path):
     bundle = make_bundle(tmp_path / "b")
     declare_supplements(bundle, [entry("appendix_a")])
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("there is no supplements/appendix_a/" in p
                for p in problems), problems
 
@@ -1073,7 +1073,7 @@ def test_an_undeclared_supplement_directory_is_refused(tmp_path):
     add_supplement(bundle, "appendix_a")
     add_supplement(bundle, "sneaked_in")
     declare_supplements(bundle, [entry("appendix_a")])
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("supplements/sneaked_in/ is not declared" in p
                for p in problems), problems
 
@@ -1083,7 +1083,7 @@ def test_the_declaration_carries_the_paper_s_own_id(tmp_path):
     bundle = make_bundle(tmp_path / "b")
     add_supplement(bundle, "appendix_a")
     declare_supplements(bundle, [entry("appendix_a")], paper_id="inv-99")
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("is not the manifest's 'inv-01'" in p for p in problems), problems
 
 
@@ -1092,7 +1092,7 @@ def test_a_declaration_of_no_supplements_is_a_mistake(tmp_path):
     keep in step and says nothing the missing file does not."""
     bundle = make_bundle(tmp_path / "b")
     declare_supplements(bundle, [])
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("declares no supplements" in p for p in problems), problems
 
 
@@ -1112,7 +1112,7 @@ def test_a_supplement_entry_is_name_title_and_exhibits(tmp_path, mutate,
     declared = entry("appendix_a")
     mutate(declared)
     declare_supplements(bundle, [declared])
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any(expected in p for p in problems), problems
 
 
@@ -1130,7 +1130,7 @@ def test_supplements_must_be_a_list_whatever_else_it_is(tmp_path, value):
     add_supplement(bundle, "ghost", labels=("table_01",))
     (bundle / "supplements.json").write_text(
         json.dumps({"id": "inv-01", "supplements": value}), encoding="utf-8")
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert problems
     assert any("'supplements' must be a list" in p or
                "declares no supplements" in p for p in problems), problems
@@ -1149,7 +1149,7 @@ def test_a_supplement_name_may_not_be_a_path_component(tmp_path):
         json.dumps({"id": "inv-01",
                     "supplements": [{"name": "..", "title": "S",
                                      "exhibits": []}]}), encoding="utf-8")
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("must contain at least one letter or digit" in p
                for p in problems), problems
     assert not any("supplements/../" in p for p in problems), problems
@@ -1162,7 +1162,7 @@ def test_a_declared_supplement_with_no_directory_reports_once(tmp_path):
     declare_supplements(bundle, [entry("absent_one",
                                        tuple(f"absent_one_table_{n:02d}"
                                              for n in range(6)))])
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert len(problems) == 1, problems
     assert "there is no supplements/absent_one/" in problems[0]
 
@@ -1173,14 +1173,14 @@ def test_a_loose_file_under_supplements_is_refused_undeclared_too(tmp_path):
     (bundle / "supplements").mkdir()
     (bundle / "supplements" / "notes.txt").write_text("stray",
                                                       encoding="utf-8")
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("supplements/ contains a file" in p for p in problems), problems
 
 
 def test_an_empty_supplements_directory_declares_nothing(tmp_path):
     bundle = make_bundle(tmp_path / "b")
     (bundle / "supplements").mkdir()
-    assert validate_bundle(bundle) == []
+    assert bundle_problems(bundle) == []
 
 
 def test_a_duplicate_key_problem_names_the_file_it_is_in(tmp_path):
@@ -1190,7 +1190,7 @@ def test_a_duplicate_key_problem_names_the_file_it_is_in(tmp_path):
         '{"id": "inv-01", "id": "inv-01", "supplements": '
         '[{"name": "appendix_a", "title": "A", "exhibits": []}]}',
         encoding="utf-8")
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("what supplements.json declares here" in p
                for p in problems), problems
 
@@ -1199,7 +1199,7 @@ def test_a_supplement_name_is_declared_once(tmp_path):
     bundle = make_bundle(tmp_path / "b")
     add_supplement(bundle, "appendix_a")
     declare_supplements(bundle, [entry("appendix_a"), entry("appendix_a")])
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("declared more than once" in p for p in problems), problems
 
 
@@ -1209,7 +1209,7 @@ def test_supplements_holds_directories_only(tmp_path):
     declare_supplements(bundle, [entry("appendix_a")])
     (bundle / "supplements" / "notes.txt").write_text("stray",
                                                       encoding="utf-8")
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("supplements/ contains a file" in p for p in problems), problems
 
 
@@ -1220,7 +1220,7 @@ def test_a_duplicate_key_in_the_declaration_is_refused(tmp_path):
         '{"id": "inv-01", "id": "inv-02", "supplements": '
         '[{"name": "appendix_a", "title": "A", "exhibits": []}]}',
         encoding="utf-8")
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("supplements.json has a duplicate key: 'id'" in p
                for p in problems), problems
 
@@ -1233,7 +1233,7 @@ def test_a_supplement_may_not_reuse_an_article_label(tmp_path):
     bundle = make_bundle(tmp_path / "b", figures=("table_01",))
     add_supplement(bundle, "appendix_a", labels=("table_01",))
     declare_supplements(bundle, [entry("appendix_a", ("table_01",))])
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("which manifest.json already declares" in p
                for p in problems), problems
 
@@ -1244,7 +1244,7 @@ def test_two_supplements_may_not_share_a_label(tmp_path):
     add_supplement(bundle, "supplement_3", labels=("shared_01",))
     declare_supplements(bundle, [entry("appendix_a", ("shared_01",)),
                                  entry("supplement_3", ("shared_01",))])
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("which supplement 'appendix_a' already declares" in p
                for p in problems), problems
 
@@ -1256,7 +1256,7 @@ def test_a_supplement_s_exhibits_are_bound_to_its_own_figures(tmp_path):
     add_supplement(bundle, "appendix_a", labels=("appendix_a_table_02",))
     declare_supplements(bundle, [entry("appendix_a",
                                        ("appendix_a_table_01",))])
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("there is no supplements/appendix_a/figures/"
                "appendix_a_table_01.png" in p for p in problems), problems
     assert any("supplements/appendix_a/figures/appendix_a_table_02.png is "
@@ -1271,7 +1271,7 @@ def test_a_supplement_s_transcription_is_held_to_the_same_rules(tmp_path):
                            '<tr><td>a</td></tr></table>'})
     declare_supplements(bundle, [entry("appendix_a",
                                        ("appendix_a_table_01",))])
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("supplements/appendix_a/tables/appendix_a_table_01.html "
                "leaves row 1 column 1 uncovered" in p
                for p in problems), problems
@@ -1284,7 +1284,7 @@ def test_a_supplement_s_figures_directory_takes_pngs_only(tmp_path):
     (root / "figures" / "notes.txt").write_text("stray", encoding="utf-8")
     declare_supplements(bundle, [entry("appendix_a",
                                        ("appendix_a_table_01",))])
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("supplements/appendix_a/figures/ contains a non-png file" in p
                for p in problems), problems
 
@@ -1293,7 +1293,7 @@ def test_an_empty_supplement_text_is_a_mistake_not_a_signal(tmp_path):
     bundle = make_bundle(tmp_path / "b")
     add_supplement(bundle, "appendix_a", text="   \n")
     declare_supplements(bundle, [entry("appendix_a")])
-    problems = validate_bundle(bundle)
+    problems = bundle_problems(bundle)
     assert any("supplements/appendix_a/text.md is empty" in p
                for p in problems), problems
 

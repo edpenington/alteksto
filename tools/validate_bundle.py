@@ -12,7 +12,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from alteksto.bundle import validate_bundle
+from alteksto.bundle import bundle_problems
 
 
 def main(argv=None) -> int:
@@ -27,7 +27,7 @@ def main(argv=None) -> int:
 
     failed = 0
     for bundle in args.bundles:
-        problems = validate_bundle(bundle)
+        problems = bundle_problems(bundle)
         if problems:
             failed += 1
             for problem in problems:

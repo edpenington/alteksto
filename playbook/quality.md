@@ -76,7 +76,12 @@ as printed.
   markers, publisher badges, and "downloaded from" boilerplate never
   appear. Paragraphs read continuously across page and column joins.
 - **Exhibits are sentinels in the text, crops in figures/.** At the
-  exhibit's position in reading order:
+  exhibit's position in reading order, and never inside a sentence.
+  A float printed across a page join lands mid-sentence in reading
+  order, and a sentinel dropped there cuts the sentence in half:
+  the prose a quote is checked against no longer contains the
+  sentence the paper prints. Move it to the nearest paragraph
+  boundary instead. At that boundary:
 
       [TABLE 2. Caption exactly as printed.]
 
@@ -90,10 +95,13 @@ as printed.
   sentinel. Figure-internal text is never transcribed, in text.md or
   anywhere else: a figure's content is its pixels.
 - **Footnotes land where they belong.** Author, correspondence, and
-  affiliation notes join front matter; exhibit footnotes belong to the
-  exhibit (crop and manifest `notes`, see above); a genuine content
-  footnote is placed at the end of the section that references it,
-  marked `Footnote:`.
+  affiliation notes join front matter, or stay in back matter where
+  the paper prints them there: some journals print correspondence
+  after the references, and following the page is right. What is
+  never right is either one interrupting contiguous prose. Exhibit
+  footnotes belong to the exhibit (crop and manifest `notes`, see
+  above); a genuine content footnote is placed at the end of the
+  section that references it, marked `Footnote:`.
 - **References** are one markdown list item per entry, in the paper's
   own citation style, characters exact.
 - **Front matter** is title, authors (with affiliation markers as

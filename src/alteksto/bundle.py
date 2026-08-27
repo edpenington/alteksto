@@ -4,9 +4,16 @@ This repository owns the bundle format; the specification lives in
 docs/bundle.md and this module is its enforcement. Consumers of the
 format (e.g. *meltiro*, *forfiltri*) accept what passes here.
 
-`bundle_problems(path)` returns EVERY problem as a list of strings; an
+`bundle_problems(path)` returns a list of strings, one per problem; an
 empty list means the bundle is valid. Nothing is raised for a malformed
-bundle, so a caller can report all problems at once.
+bundle, so one run reports everything the module found. That is every
+problem it can state truthfully, which is deliberately not every problem
+there may be: a cross-check is skipped when the declaration or directory
+it would read is itself malformed, and a duplicate key ends its file's
+report, because a problem derived from values that cannot be trusted is
+a guess in the voice of a fact, and would bury the report of the fault
+it grew from. Fixing that fault and running again surfaces whatever it
+was hiding.
 
 `figure_files(path)` answers the other question a consumer has to ask of
 the directory: which files in it are exhibits, and what each is called.
@@ -31,6 +38,7 @@ package and carries no PDF library it never opens.
 from __future__ import annotations
 
 import json
+import os
 import re
 from html.parser import HTMLParser
 from pathlib import Path
@@ -38,30 +46,28 @@ from pathlib import Path
 SCHEMA_VERSION = 5
 
 
+# -------------------------- the rule for every name that becomes a path
+
 def name_problem(value, what="name", where="", because=None):
     r"""Why a name may not become a path in a bundle, or None if it may.
 
     The id, an exhibit label and a supplement name each become a
-    directory or a file stem, so all three come here, and so does the
-    producing side before it stages a name: refusing at gate 1 what
-    could have been refused at staging means the whole conversion runs
-    first, which is the expensive way to learn it.
-
-    The whole rule is in this one function, the characters allowed, the
-    requirement that at least one be alphanumeric, and the words each
-    half is reported in, so that nothing anywhere holds a piece of it to
-    drift from. That is not hypothetical twice over: an exhibit label
-    went without the second half from the first commit until it was
-    noticed, and the tool that stages a supplement wrote its own wording
-    of the rule under a docstring promising it had not.
+    directory or a file stem, and this function notes any problems
+    that would arise as a result
 
     `what` and `where` locate the name for its reader, and `because`
     says what this particular name is for.
 
-    `\Z`, not `$`: Python's `$` also matches immediately before a
+    It uses `\Z`, not `$`: Python's `$` also matches immediately before a
     trailing newline, so `$` would accept "fig_01\n". The problem says
     `$` anyway, that being the form a reader knows, and the words beside
     it already exclude a newline.
+
+    A leading dot is refused even though the pattern admits a dot
+    anywhere: every directory walk, here and in a consumer, skips
+    dot-leading entries as OS metadata, so a name starting with one
+    would declare a file no reader ever sees, and the report about it
+    would accuse a file that is really there of being missing.
     """
     head = " ".join(part for part in (where, what) if part)
     if not isinstance(value, str):
@@ -77,21 +83,40 @@ def name_problem(value, what="name", where="", because=None):
         # caller has.
         because = because or ("punctuation alone is not a name, and '.' "
                               "and '..' resolve to real directories")
+    elif value.startswith("."):
+        problem = (f"{head} {value!r} must not start with a dot; every "
+                   f"directory walk skips dot-leading entries as OS "
+                   f"metadata, so what this names would never be read")
     else:
         return None
     return f"{problem}: {because}" if because else problem
 
 
-def bundle_problems(path) -> list[str]:
-    """Return a list of ALL problems with the bundle at path.
+# ------------------------ the whole bundle, and reading its disk at all
 
-    Empty list means valid. Never raises for a malformed bundle.
+def bundle_problems(path) -> list[str]:
+    """Return the problems with the bundle at path.
+
+    Empty list means valid. Never raises for a malformed bundle, and
+    never blocks: the disk failing to read (permissions, pipes, links
+    to nowhere) is not the bundle being malformed, but it is answered
+    with a problem too, not an exception or a hang. The list is every
+    problem this module can state truthfully; the module docstring says
+    where it deliberately stops, and why.
     """
     root = Path(path)
-    if not root.exists():
+    if not root.exists() and not root.is_symlink():
         return [f"bundle directory does not exist: {root}"]
     if not root.is_dir():
         return [f"bundle path is not a directory: {root}"]
+    # Probed before any check reports, because an unreadable directory
+    # would otherwise report every file in it as missing, which is
+    # false: nothing could be read at all.
+    try:
+        _list_directory(root)
+    except OSError as exc:
+        return [f"bundle directory could not be read: {exc}; nothing "
+                f"in it can be checked"]
 
     problems: list[str] = []
     manifest_problems, declared, paper_id = _manifest_problems(root)
@@ -103,20 +128,69 @@ def bundle_problems(path) -> list[str]:
     problems.extend(figure_problems)
     problems.extend(table_problems)
     problems.extend(supplement_problems)
-    # The cross-checks run only when both sides are themselves well formed:
+    # A cross-check runs only over sides that are themselves well formed:
     # a malformed exhibits block or an unusable figures/ has already been
     # reported, and cross-checking against it would bury that report under
     # derived noise.
     if declared is not None and present is not None:
-        problems.extend(_cross_check_exhibits(declared, present))
+        problems.extend(_exhibit_binding_problems(declared, present))
     if declared is not None and transcribed is not None:
-        problems.extend(_cross_check_tables(declared, transcribed))
+        problems.extend(_table_binding_problems(declared, transcribed))
     if supplements:
         problems.extend(_supplement_contents_problems(root, supplements))
-    if declared is not None and supplements:
-        problems.extend(_cross_check_label_uniqueness(declared, supplements))
+        # Label uniqueness reads the manifest only for the article's own
+        # labels. When its exhibits block is malformed those labels are
+        # unknown and their clashes wait, but a clash between two
+        # supplements does not depend on the manifest at all, so the check
+        # still runs with no article labels rather than being skipped with
+        # the rest.
+        problems.extend(_label_uniqueness_problems(
+            declared if declared is not None else [], supplements))
     return problems
 
+
+def _list_directory(directory: Path) -> list[Path]:
+    """The directory's entries, sorted, or OSError when it cannot give
+    them.
+
+    Listing needs the directory readable and the stat through it needs
+    it searchable, and a walk that goes on without both reports files
+    that are present as missing, which is false and cannot be followed
+    to a fix. The dot is joined as a string because pathlib normalizes
+    a "." component away, and the path that leaves would stat the
+    directory itself, a thing its parent's permissions govern.
+    """
+    children = sorted(directory.iterdir())
+    os.stat(os.path.join(directory, "."))
+    return children
+
+
+def _read_utf8(path: Path, where: str):
+    """Return (text, problem) for one file the format wants read.
+
+    Reading the disk can fail in ways that are not the bundle being
+    malformed, and every one of them must come back as a problem rather
+    than an exception or a hang: bundle_problems never raises and never
+    blocks. The shape is checked before the open, because opening a
+    FIFO for reading blocks until something writes to it, and because a
+    path that is not a regular file is a shape fault and is reported as
+    one rather than in encoding words.
+    """
+    if path.is_dir():
+        return None, f"{where} is a directory where the format needs a file"
+    if not path.is_file():
+        return None, (f"{where} is not a regular file that can be read "
+                      f"(a pipe, socket, device or dangling link holds "
+                      f"no text)")
+    try:
+        return path.read_text(encoding="utf-8"), None
+    except UnicodeDecodeError as exc:
+        return None, f"{where} could not be read as UTF-8: {exc}"
+    except OSError as exc:
+        return None, f"{where} could not be read: {exc}"
+
+
+# -------------------------------------------------------- manifest.json
 
 # Manifest field contract: name -> (required?, type, allow_empty?). `str`
 # covers the JSON string type; bool is deliberately not a valid int (see
@@ -157,17 +231,30 @@ def _manifest_problems(root: Path):
     """
     problems: list[str] = []
     manifest_path = root / "manifest.json"
-    if not manifest_path.exists():
+    if not manifest_path.exists() and not manifest_path.is_symlink():
         return ["manifest.json is missing"], None, None
-    try:
-        raw = manifest_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        return [f"manifest.json could not be read as UTF-8: "
-                f"{exc}"], None, None
+    raw, unread = _read_utf8(manifest_path, "manifest.json")
+    if unread:
+        return [unread], None, None
     try:
         data, duplicates = _parse_manifest(raw)
     except json.JSONDecodeError as exc:
         return [f"manifest.json is not valid JSON: {exc}"], None, None
+    except ValueError:
+        # JSONDecodeError is a ValueError and is caught above, so this
+        # clause sees only a file json read as JSON and Python then
+        # refused to build a value from. CPython's integer digit limit
+        # is the known case: a literal of more than
+        # sys.get_int_max_str_digits() digits raises a plain ValueError,
+        # not a JSONDecodeError, from either parse site.
+        # The interpreter's own words are not repeated here: they end by
+        # naming the call that raises the limit, which is advice for
+        # someone writing a reader and the wrong way round for someone
+        # holding a bundle. No manifest field carries such a number, so
+        # the fault is the file, not the reader's ceiling.
+        return ["manifest.json holds a number too long to read; no "
+                "manifest field carries a number of thousands of "
+                "digits"], None, None
     except RecursionError:
         # The walk below carries its own queue so that depth cannot throw
         # out of it, but the parse runs first and json's scanner recurses in
@@ -182,7 +269,15 @@ def _manifest_problems(root: Path):
         return [f"manifest.json must be a JSON object, got "
                 f"{type(data).__name__}"], None, None
 
-    problems.extend(_duplicate_key_problems(data, duplicates))
+    # Nothing further is said about a file whose values cannot be known.
+    # A check on a duplicated key reads whichever value the parse kept, so
+    # `"schema_version": 5, "schema_version": 99` reports "got 99" about a
+    # manifest that also says 5, and an id read this way travels on into the
+    # comparison with supplements.json and accuses the wrong file. Every
+    # duplicate in the file is named first, because the author has to open
+    # it either way, and one run should show them all of it.
+    if duplicates:
+        return _duplicate_key_problems(data, duplicates), None, None
 
     for key in data:
         if key not in _MANIFEST_FIELDS:
@@ -343,13 +438,13 @@ def _exhibit_problems(value, where="manifest.json"):
 
     Returns (problems, labels): the declared labels in declaration order,
     and every problem with the block's shape. An empty list is valid and
-    yields ([], []), the author's explicit assertion that the paper
-    contains no tables and no figures.
+    yields ([], []), the author's explicit assertion that the paper, or
+    the supplement declaring it, contains no tables and no figures.
     """
     if not isinstance(value, list):
-        return ([f"{where} key 'exhibits' must be a list of "
-                 f"{{label, caption}} objects, got "
-                 f"{type(value).__name__}"], [])
+        return ([f"{where} key 'exhibits' must be a list of objects, each "
+                 f"carrying 'label' and 'caption' plus optional non-empty "
+                 f"'notes', got {type(value).__name__}"], [])
     problems: list[str] = []
     labels: list[str] = []
     seen: set[str] = set()
@@ -357,9 +452,9 @@ def _exhibit_problems(value, where="manifest.json"):
     for index, entry in enumerate(value):
         where = f"{declared_in} exhibits[{index}]"
         if not isinstance(entry, dict):
-            problems.append(f"{where} must be an object with exactly "
-                            f"'label' and 'caption', got "
-                            f"{type(entry).__name__}")
+            problems.append(f"{where} must be an object carrying 'label' "
+                            f"and 'caption' plus optional non-empty "
+                            f"'notes', got {type(entry).__name__}")
             continue
         for key in sorted(entry):
             if key not in _EXHIBIT_KEYS + _EXHIBIT_OPTIONAL_KEYS:
@@ -404,18 +499,21 @@ def _exhibit_problems(value, where="manifest.json"):
     return problems, labels
 
 
+# -------------------------------------------------------------- text.md
+
 def _text_problems(root: Path) -> list[str]:
     text_path = root / "text.md"
-    if not text_path.exists():
+    if not text_path.exists() and not text_path.is_symlink():
         return ["text.md is missing"]
-    try:
-        text = text_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        return [f"text.md could not be read as UTF-8: {exc}"]
+    text, unread = _read_utf8(text_path, "text.md")
+    if unread:
+        return [unread]
     if not text.strip():
         return ["text.md is empty"]
     return []
 
+
+# ------------------------------------------------------------- figures/
 
 def figure_files(root) -> dict[str, Path]:
     """The crops a bundle supplies: label to path, ordered by label.
@@ -442,9 +540,16 @@ def figure_files(root) -> dict[str, Path]:
             continue  # hidden OS metadata (.DS_Store etc.) is not an asset
         if child.is_dir():
             continue
-        if child.suffix.lower() == ".png":
+        if child.suffix == ".png":
             found[child.stem] = child
     return {label: found[label] for label in sorted(found)}
+
+
+# The eight bytes every PNG file starts with. The check on a crop reads
+# these and the file's size, never a pixel: it says whether the file is
+# a PNG at all, which is the least a consumer opening figures/<label>.png
+# relies on, and no more.
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 def _figure_problems(root: Path, prefix: str = ""):
@@ -458,28 +563,62 @@ def _figure_problems(root: Path, prefix: str = ""):
     when the directory itself is unusable (so the caller skips the
     cross-checks). What is a crop is that function's answer, not a second
     reading of the directory; what is left over is what is reported here.
+    Each crop is then held to being a non-empty regular file starting
+    with the PNG signature, because a zero-byte file, a GIF renamed, or
+    a link to nothing would otherwise pass and fail in the consumer that
+    was promised what passes here.
     """
     figures_dir = root / "figures"
-    if not figures_dir.exists():
+    if not figures_dir.exists() and not figures_dir.is_symlink():
         return [], []
     if not figures_dir.is_dir():
         return [f"{prefix}figures exists but is not a directory: "
                 f"{figures_dir}"], None
+    try:
+        children = _list_directory(figures_dir)
+    except OSError as exc:
+        return [f"{prefix}figures/ could not be read: {exc}; nothing "
+                f"in it can be checked"], None
     problems: list[str] = []
-    for child in sorted(figures_dir.iterdir()):
+    for child in children:
         if child.name.startswith("."):
             continue
         if child.is_dir():
             problems.append(f"{prefix}figures/ contains a subdirectory "
                             f"(only .png files allowed): {child.name}")
-        elif child.suffix.lower() != ".png":
+        elif child.suffix != ".png":
             problems.append(f"{prefix}figures/ contains a non-png file "
-                            f"(only .png files allowed): {child.name}")
-    return problems, list(figure_files(root))
+                            f"(the suffix must be exactly .png, "
+                            f"lowercase): {child.name}")
+    crops = figure_files(root)
+    for label, path in crops.items():
+        where = f"{prefix}figures/{label}.png"
+        if not path.is_file():
+            problems.append(f"{where} is not a regular file; a crop is "
+                            f"an ordinary file holding a PNG image, and "
+                            f"a pipe, socket or dangling link holds "
+                            f"none")
+            continue
+        try:
+            with path.open("rb") as crop:
+                head = crop.read(len(_PNG_SIGNATURE))
+        except OSError as exc:
+            problems.append(f"{where} could not be read: {exc}")
+            continue
+        if not head:
+            problems.append(f"{where} is empty; a crop is a PNG image, "
+                            f"and an empty file holds none")
+        elif head != _PNG_SIGNATURE:
+            problems.append(f"{where} does not start with the PNG "
+                            f"signature; whatever the file holds, it is "
+                            f"not a PNG, and a consumer opening it as "
+                            f"one fails")
+    return problems, list(crops)
 
 
-def _cross_check_exhibits(declared_labels, present_labels, prefix="",
-                          declared_in="manifest.json") -> list[str]:
+def _exhibit_binding_problems(declared_labels, present_labels,
+                              prefix="",
+                              declared_in="manifest.json") -> list[str]:
     """Bind a declaration to its figures/. Both directions are hard
     errors; docs/bundle.md says why. `prefix` and `declared_in` name the
     directory and the file that declares it, so a supplement's problems
@@ -498,6 +637,8 @@ def _cross_check_exhibits(declared_labels, present_labels, prefix="",
             f"declared with its caption")
     return problems
 
+
+# -------------------------------------------------------------- tables/
 
 def table_files(root) -> dict[str, Path]:
     """The table transcriptions a bundle supplies: label to path, by label.
@@ -525,7 +666,7 @@ def table_files(root) -> dict[str, Path]:
             continue  # hidden OS metadata (.DS_Store etc.) is not an asset
         if child.is_dir():
             continue
-        if child.suffix.lower() == ".html":
+        if child.suffix == ".html":
             found[child.stem] = child
     return {label: found[label] for label in sorted(found)}
 
@@ -538,35 +679,41 @@ def _table_problems(root: Path, prefix: str = ""):
     skips the cross-check the way it does for figures/.
     """
     tables_dir = root / "tables"
-    if not tables_dir.exists():
+    if not tables_dir.exists() and not tables_dir.is_symlink():
         return [], []
     if not tables_dir.is_dir():
         return [f"{prefix}tables exists but is not a directory: "
                 f"{tables_dir}"], None
+    try:
+        children = _list_directory(tables_dir)
+    except OSError as exc:
+        return [f"{prefix}tables/ could not be read: {exc}; nothing "
+                f"in it can be checked"], None
     problems: list[str] = []
-    for child in sorted(tables_dir.iterdir()):
+    for child in children:
         if child.name.startswith("."):
             continue
         if child.is_dir():
             problems.append(f"{prefix}tables/ contains a subdirectory "
                             f"(only .html files allowed): {child.name}")
-        elif child.suffix.lower() != ".html":
+        elif child.suffix != ".html":
             problems.append(f"{prefix}tables/ contains a non-html file "
-                            f"(only .html files allowed): {child.name}")
+                            f"(the suffix must be exactly .html, "
+                            f"lowercase): {child.name}")
     transcriptions = table_files(root)
     for label, path in transcriptions.items():
         where = f"{prefix}tables/{label}.html"
-        try:
-            source = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            problems.append(f"{where} could not be read as UTF-8: {exc}")
+        source, unread = _read_utf8(path, where)
+        if unread:
+            problems.append(unread)
             continue
         problems.extend(table_html_problems(source, where))
     return problems, list(transcriptions)
 
 
-def _cross_check_tables(declared_labels, transcribed_labels, prefix="",
-                        declared_in="manifest.json") -> list[str]:
+def _table_binding_problems(declared_labels, transcribed_labels,
+                            prefix="",
+                            declared_in="manifest.json") -> list[str]:
     """Bind tables/ to the manifest's declaration, in the one direction
     that is an error.
 
@@ -587,20 +734,23 @@ def _cross_check_tables(declared_labels, transcribed_labels, prefix="",
     ]
 
 
+# ---------------------------------------- what a transcription may hold
+
+# Elements a table's cells may contain, and which may nest in each other.
+_INLINE_ELEMENTS = frozenset({"sup", "sub", "br", "em", "strong"})
+_CELL_ELEMENTS = frozenset({"th", "td"})
+_ROW_GROUPS = frozenset({"thead", "tbody"})
 # The elements a table transcription may use. The list is short on purpose:
 # it is everything needed to say what a printed table says, and nothing that
 # carries presentation, scripting or a second document inside the first.
 # `caption` is absent deliberately and reported by name below, because a
 # caption is carried by text.md and the manifest and a crop that bakes the
 # printed caption into the image invites an author to repeat it here.
-_TABLE_ELEMENTS = frozenset({
-    "table", "thead", "tbody", "tr", "th", "td",
-    "sup", "sub", "br", "em", "strong",
-})
-# Elements a table's cells may contain, and which may nest in each other.
-_INLINE_ELEMENTS = frozenset({"sup", "sub", "br", "em", "strong"})
-_CELL_ELEMENTS = frozenset({"th", "td"})
-_ROW_GROUPS = frozenset({"thead", "tbody"})
+# The whitelist is the union of the sets above, plus the two elements that
+# are only themselves, so it cannot drift from the sets that classify what
+# is in it.
+_TABLE_ELEMENTS = (frozenset({"table", "tr"}) | _ROW_GROUPS
+                   | _CELL_ELEMENTS | _INLINE_ELEMENTS)
 # `br` is the only element written in the self-closing form; every other
 # element in the whitelist is opened and closed.
 _VOID_ELEMENTS = frozenset({"br"})
@@ -1109,9 +1259,29 @@ def _supplement_problems(root: Path, manifest_id):
     An empty dict is the ordinary case: most papers have no supplement.
     """
     declaration = root / "supplements.json"
-    present = supplement_dirs(root)
-    stray = _stray_supplement_files(root)
-    if not declaration.exists():
+    supplements_dir = root / "supplements"
+    try:
+        if supplements_dir.is_dir():
+            _list_directory(supplements_dir)
+        present = supplement_dirs(root)
+        stray = _stray_supplement_files(root)
+    except OSError as exc:
+        # An unreadable supplements/ is unusable the way a file at its
+        # path is: present becomes None so nothing below claims to know
+        # what the directory holds.
+        present = None
+        stray = [f"supplements/ could not be read: {exc}; nothing in "
+                 f"it can be checked"]
+    if ((supplements_dir.exists() or supplements_dir.is_symlink())
+            and not supplements_dir.is_dir()):
+        # The fault figures/ and tables/ report in the same words: the
+        # name the format reserves for a directory is held by a file.
+        # present becomes None so the declared names are not each also
+        # reported as missing the directory this file displaces.
+        stray.append(f"supplements exists but is not a directory: "
+                     f"{supplements_dir}")
+        present = None
+    if not declaration.exists() and not declaration.is_symlink():
         if present:
             return ([f"supplements/ holds {', '.join(sorted(present))} but "
                      f"there is no supplements.json; a supplement reaches a "
@@ -1121,22 +1291,34 @@ def _supplement_problems(root: Path, manifest_id):
         # declaration of anything, but a loose file in it is refused on the
         # same terms it would be with a declaration beside it.
         return stray, {}
-    try:
-        raw = declaration.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        return [f"supplements.json could not be read as UTF-8: {exc}"], None
+    raw, unread = _read_utf8(declaration, "supplements.json")
+    if unread:
+        return [unread] + stray, None
     try:
         data, duplicates = _parse_manifest(raw)
     except json.JSONDecodeError as exc:
-        return [f"supplements.json is not valid JSON: {exc}"], None
+        return [f"supplements.json is not valid JSON: {exc}"] + stray, None
+    except ValueError:
+        # As in the manifest's parse: JSONDecodeError is caught above,
+        # and what reaches here is a value Python refused to build,
+        # CPython's integer digit limit being the known case.
+        return ["supplements.json holds a number too long to read; no "
+                "field of this file carries a number of thousands of "
+                "digits"] + stray, None
     except RecursionError:
-        return ["supplements.json is nested too deeply to parse"], None
+        return (["supplements.json is nested too deeply to parse"]
+                + stray), None
     if not isinstance(data, dict):
         return [f"supplements.json must be a JSON object, got "
-                f"{type(data).__name__}"], None
+                f"{type(data).__name__}"] + stray, None
 
     problems = _duplicate_key_problems(data, duplicates, "supplements.json")
     problems.extend(stray)
+    # As with the manifest, on the same terms. The reports about the
+    # directory stand: they are read off the disk, not out of the
+    # declaration, so a duplicate says nothing about them either way.
+    if duplicates:
+        return problems, None
     for key in data:
         if key not in _SUPPLEMENTS_FIELDS:
             problems.append(f"supplements.json has unknown key: {key!r}")
@@ -1171,13 +1353,14 @@ def _supplement_problems(root: Path, manifest_id):
     if declared is None:
         return problems, None
 
-    for name in sorted(set(declared) - set(present)):
-        problems.append(f"supplements.json declares supplement {name!r} but "
-                        f"there is no supplements/{name}/")
-    for name in sorted(set(present) - set(declared)):
-        problems.append(f"supplements/{name}/ is not declared in "
-                        f"supplements.json; a supplement a consumer can "
-                        f"read is one the bundle vouches for")
+    if present is not None:
+        for name in sorted(set(declared) - set(present)):
+            problems.append(f"supplements.json declares supplement {name!r} "
+                            f"but there is no supplements/{name}/")
+        for name in sorted(set(present) - set(declared)):
+            problems.append(f"supplements/{name}/ is not declared in "
+                            f"supplements.json; a supplement a consumer can "
+                            f"read is one the bundle vouches for")
     return problems, declared
 
 
@@ -1283,24 +1466,38 @@ def _supplement_contents_problems(root: Path, supplements) -> list[str]:
     problems say supplements.json rather than manifest.json.
     """
     problems: list[str] = []
-    present = supplement_dirs(root)
+    try:
+        present = supplement_dirs(root)
+    except OSError:
+        # Already reported where supplements/ was first listed; the walk
+        # over its contents has nothing it can read.
+        return []
     for name in sorted(supplements):
         if name not in present:
-            continue  # already reported as declared with no directory, and
-            # walking it would report every one of its exhibits again
+            continue  # already reported, as declared with no directory or
+            # as supplements/ itself not being a directory, and walking on
+            # would report every one of the supplement's exhibits again
         labels = supplements[name]
         supplement = root / "supplements" / name
         prefix = f"supplements/{name}/"
-        figure_problems, present = _figure_problems(supplement, prefix)
+        try:
+            _list_directory(supplement)
+        except OSError as exc:
+            # As at the bundle root: an unreadable directory would
+            # otherwise report its every file as missing.
+            problems.append(f"{prefix} could not be read: {exc}; "
+                            f"nothing in it can be checked")
+            continue
+        figure_problems, cropped = _figure_problems(supplement, prefix)
         table_problems, transcribed = _table_problems(supplement, prefix)
         problems.extend(_supplement_text_problems(supplement, prefix))
         problems.extend(figure_problems)
         problems.extend(table_problems)
-        if present is not None:
-            problems.extend(_cross_check_exhibits(
-                labels, present, prefix, "supplements.json"))
+        if cropped is not None:
+            problems.extend(_exhibit_binding_problems(
+                labels, cropped, prefix, "supplements.json"))
         if transcribed is not None:
-            problems.extend(_cross_check_tables(
+            problems.extend(_table_binding_problems(
                 labels, transcribed, prefix, "supplements.json"))
     return problems
 
@@ -1314,19 +1511,20 @@ def _supplement_text_problems(root: Path, prefix: str) -> list[str]:
     empty.
     """
     text_path = root / "text.md"
-    if not text_path.exists():
+    if not text_path.exists() and not text_path.is_symlink():
         return []
-    try:
-        text = text_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        return [f"{prefix}text.md could not be read as UTF-8: {exc}"]
+    text, unread = _read_utf8(text_path, f"{prefix}text.md")
+    if unread:
+        return [unread]
     if not text.strip():
         return [f"{prefix}text.md is empty; a supplement with no prose "
                 f"omits the file rather than supplying an empty one"]
     return []
 
 
-def _cross_check_label_uniqueness(article_labels, supplements) -> list[str]:
+# ---------------------------- one label, one exhibit, across the bundle
+
+def _label_uniqueness_problems(article_labels, supplements) -> list[str]:
     """One label, one exhibit, across the whole bundle.
 
     A consumer cites an exhibit by its label alone: the filename stem is

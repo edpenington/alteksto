@@ -7,6 +7,8 @@ asserts the validator names it.
 
 import ast
 import json
+import os
+import signal
 import sys
 import time
 import tomllib
@@ -64,6 +66,28 @@ def make_bundle(root, *, manifest=None, text="# An invented paper\n\nBody.",
     return root
 
 
+def bundle_problems_must_return(bundle, seconds=10):
+    """bundle_problems, failed rather than hung if it blocks.
+
+    The contract is that it always returns. A regression that blocks
+    (reading a FIFO, say) would otherwise hang the whole suite, so the
+    tests that probe blocking shapes call it through this deadline.
+    """
+    if not hasattr(signal, "alarm"):
+        return bundle_problems(bundle)
+
+    def expired(signum, frame):
+        raise AssertionError("bundle_problems did not return")
+
+    previous = signal.signal(signal.SIGALRM, expired)
+    signal.alarm(seconds)
+    try:
+        return bundle_problems(bundle)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+
+
 def test_a_minimal_bundle_is_valid(tmp_path):
     assert bundle_problems(make_bundle(tmp_path / "b")) == []
 
@@ -84,6 +108,50 @@ def test_missing_manifest_and_text_both_reported(tmp_path):
     problems = bundle_problems(root)
     assert any("manifest.json is missing" in p for p in problems)
     assert any("text.md is missing" in p for p in problems)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="needs POSIX permissions")
+@pytest.mark.parametrize("mode", [0, 0o444])
+def test_an_unreadable_bundle_root_says_so_and_nothing_else(tmp_path, mode):
+    """Nothing in it could be read, and every check knows nothing.
+
+    An unreadable root used to report manifest.json and text.md as
+    missing, which was false: both were there. Worse, iterdir raised
+    PermissionError out of bundle_problems, which promises to raise for
+    no input. The one true statement is that the directory could not be
+    read, and anything beside it would be a guess in the voice of a
+    fact. 0o444 is the sharper half: the listing works, but nothing
+    listed can be reached, so a walk that stopped at the listing would
+    still report every file as missing.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("root reads through permission bits")
+    bundle = make_bundle(tmp_path / "b")
+    os.chmod(bundle, mode)
+    try:
+        problems = bundle_problems_must_return(bundle)
+    finally:
+        os.chmod(bundle, 0o755)
+    assert len(problems) == 1, problems
+    assert "bundle directory could not be read" in problems[0]
+    assert "missing" not in problems[0]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="needs symlinks")
+def test_a_dangling_symlink_is_not_reported_as_missing(tmp_path):
+    """'manifest.json is missing' is false of a link ls shows.
+
+    The truth is that the link leads nowhere and holds nothing to read,
+    and that is what the person has to fix: remove the link or restore
+    its target, not create a file beside it.
+    """
+    bundle = make_bundle(tmp_path / "b")
+    (bundle / "manifest.json").unlink()
+    (bundle / "manifest.json").symlink_to(bundle / "nowhere")
+    problems = bundle_problems(bundle)
+    assert any("manifest.json is not a regular file" in p
+               for p in problems), problems
+    assert not any("manifest.json is missing" in p for p in problems)
 
 
 def test_unknown_manifest_key_rejected(tmp_path):
@@ -207,10 +275,10 @@ def test_an_exhibit_label_of_punctuation_alone_is_rejected(tmp_path):
 
 @pytest.mark.parametrize("value, legal", [
     ("table_01", True), ("demo.001", True), ("a-b", True), ("_x1", True),
-    ("1234", True),
+    ("1234", True), ("fig.01", True),
     (".", False), ("..", False), ("-", False), ("___", False),
     ("has space", False), ("a/b", False), ("fig_01\n", False),
-    ("", False), (7, False),
+    ("", False), (7, False), (".hidden01", False),
 ])
 def test_the_name_rule_answers_for_every_shape_of_name(value, legal):
     """Both halves and both sides of each, on one call.
@@ -264,6 +332,41 @@ def test_a_dotted_id_with_an_alphanumeric_is_allowed(tmp_path):
     assert bundle_problems(bundle) == []
 
 
+def test_a_dot_leading_label_is_refused_with_a_true_message(tmp_path):
+    """A dot-leading label declares a file every walk skips.
+
+    With figures/.hidden01.png genuinely on disk, the validator used to
+    say there was no such file: every directory walk skips dot-leading
+    entries as OS metadata, so the crop was invisible, the message was
+    false, and following it could not fix the bundle. The name rule now
+    refuses the leading dot itself, so the person is told the real rule
+    and the walks' dotfile skip can no longer hide a legitimate name.
+    """
+    bundle = make_bundle(tmp_path / "b")
+    (bundle / "figures").mkdir()
+    (bundle / "figures" / ".hidden01.png").write_bytes(PNG_STUB)
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    manifest["exhibits"] = [{"label": ".hidden01", "caption": "H."}]
+    (bundle / "manifest.json").write_text(json.dumps(manifest))
+    problems = bundle_problems(bundle)
+    assert any("must not start with a dot" in p for p in problems), problems
+    assert not any("there is no figures/.hidden01.png" in p
+                   for p in problems), problems
+
+
+def test_a_dot_leading_id_is_refused(tmp_path):
+    # '.hidden' matched the pattern and holds a letter, so it passed
+    # clean, but as a directory name it is hidden OS metadata to every
+    # reader. The rule that refuses a dot-leading label refuses it here
+    # too, because the id becomes a path component the same way.
+    bundle = make_bundle(tmp_path / "b")
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    manifest["id"] = ".hidden"
+    (bundle / "manifest.json").write_text(json.dumps(manifest))
+    assert any("must not start with a dot" in p
+               for p in bundle_problems(bundle))
+
+
 @pytest.mark.parametrize("entry, expected", [
     ({"label": "table_01", "caption": "  "}, "'caption' must be a non-empty"),
     ({"label": "  ", "caption": "T1."}, "'label' must be a non-empty"),
@@ -288,6 +391,22 @@ def test_exhibits_is_a_list_of_objects(tmp_path, exhibits, expected):
     manifest["exhibits"] = exhibits
     (bundle / "manifest.json").write_text(json.dumps(manifest))
     assert any(expected in p for p in bundle_problems(bundle))
+
+
+@pytest.mark.parametrize("exhibits", [
+    {"table_01": "Table 1."},
+    ["table_01"],
+])
+def test_a_shape_problem_states_the_whole_entry_contract(tmp_path, exhibits):
+    """The shape messages state the contract with 'notes' in it. A message
+    claiming an entry is exactly label and caption would send an author to
+    delete a legitimate key the code below accepts."""
+    bundle = make_bundle(tmp_path / "b")
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    manifest["exhibits"] = exhibits
+    (bundle / "manifest.json").write_text(json.dumps(manifest))
+    assert any("optional non-empty 'notes'" in p
+               for p in bundle_problems(bundle))
 
 
 def test_a_malformed_exhibits_block_is_not_cross_checked(tmp_path):
@@ -316,6 +435,31 @@ def test_a_manifest_that_is_not_an_object_is_one_problem(tmp_path, raw,
     (bundle / "manifest.json").write_text(raw, encoding="utf-8")
     problems = bundle_problems(bundle)
     assert len(problems) == 1 and expected in problems[0]
+
+
+def test_a_number_of_thousands_of_digits_is_a_problem_not_a_crash(tmp_path):
+    """The one parse fault that escaped both guards, at both sites.
+
+    CPython refuses to build an int past its digit limit with a plain
+    ValueError, which is neither a JSONDecodeError nor a RecursionError,
+    so it raised out of bundle_problems and cracked the CLI open. The
+    file is malformed in every way that matters, so it comes back as a
+    problem like the rest.
+    """
+    digits = "1" * 5000
+    bundle = make_bundle(tmp_path / "b")
+    (bundle / "manifest.json").write_text(
+        f'{{"schema_version": {digits}}}', encoding="utf-8")
+    problems = bundle_problems(bundle)
+    assert len(problems) == 1, problems
+    assert "manifest.json holds a number too long to read" in problems[0]
+
+    bundle2 = make_bundle(tmp_path / "b2")
+    (bundle2 / "supplements.json").write_text(
+        f'{{"id": {digits}}}', encoding="utf-8")
+    problems = bundle_problems(bundle2)
+    assert any("supplements.json holds a number too long to read" in p
+               for p in problems), problems
 
 
 def test_a_duplicated_manifest_key_is_rejected(tmp_path):
@@ -348,17 +492,20 @@ def test_a_duplicated_key_inside_an_exhibit_is_located(tmp_path):
             in problems[0])
 
 
-def test_every_duplicate_is_named_and_the_rest_is_still_checked(tmp_path):
-    """A duplicate hides neither the ones after it nor anything else.
+def test_every_duplicate_is_named_and_nothing_else_is(tmp_path):
+    """A duplicate hides no other duplicate, and ends the report there.
 
-    Two reasons. The parser finishes an exhibit entry before the object
-    holding it, so reporting the first duplicate it finds would name the
-    caption and never reach the id, the key this rule exists for. And the
-    file's other problems are still true of it, so an author fixing the
-    manifest sees them in one run of gate 1 rather than one per run.
-
+    Every duplicate is named because the parser finishes an exhibit entry
+    before the object holding it, so reporting the first one it finds would
+    name the caption and never reach the id, the key this rule exists for.
     The id is written three times to pin that a key is one problem however
     often it repeats.
+
+    Nothing else is named, because nothing else can be said honestly. A
+    check on a duplicated key reads whichever value the parse kept, and the
+    unknown key here would be reported beside a schema_version complaint
+    about a number the file may also state correctly. The author has to
+    open the file whatever it says; it says the one thing that is true.
     """
     bundle = make_bundle(tmp_path / "b", figures=("table_01",))
     (bundle / "manifest.json").write_text(
@@ -373,8 +520,9 @@ def test_every_duplicate_is_named_and_the_rest_is_still_checked(tmp_path):
     assert "manifest.json has a duplicate key: 'id'" in named[0]
     assert ("manifest.json exhibits[0] has a duplicate key: 'caption'"
             in named[1])
-    assert any("unknown key: 'warden'" in p for p in problems)
-    assert any("missing required key: 'title'" in p for p in problems)
+    assert problems == named
+    assert not any("unknown key: 'warden'" in p for p in problems)
+    assert not any("missing required key: 'title'" in p for p in problems)
 
 
 def test_a_repeated_key_is_not_confused_with_a_repeated_value(tmp_path):
@@ -492,6 +640,40 @@ def test_empty_text_md_is_invalid(tmp_path):
     assert any("text.md is empty" in p for p in bundle_problems(bundle))
 
 
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs mkfifo")
+def test_a_fifo_at_text_md_cannot_block_validation(tmp_path):
+    """Opening a FIFO for reading blocks until something writes to it.
+
+    A validator that read it would never return, and not returning is
+    worse than raising: nothing downstream ever gets a verdict. So the
+    shape of every path is checked before any open, and a FIFO is
+    refused unopened.
+    """
+    bundle = make_bundle(tmp_path / "b")
+    (bundle / "text.md").unlink()
+    os.mkfifo(bundle / "text.md")
+    problems = bundle_problems_must_return(bundle)
+    assert any("text.md is not a regular file" in p
+               for p in problems), problems
+
+
+def test_a_directory_at_text_md_is_a_shape_fault_not_an_encoding_one(
+        tmp_path):
+    """A shape fault says the shape.
+
+    This used to report 'could not be read as UTF-8: [Errno 21] Is a
+    directory', which sends a person hunting an encoding fault in a
+    thing that has no bytes to decode. What they have to change is the
+    shape: replace the directory with a file.
+    """
+    bundle = make_bundle(tmp_path / "b")
+    (bundle / "text.md").unlink()
+    (bundle / "text.md").mkdir()
+    problems = bundle_problems(bundle)
+    assert any("text.md is a directory" in p for p in problems), problems
+    assert not any("UTF-8" in p for p in problems), problems
+
+
 def test_cross_check_both_directions(tmp_path):
     # Declared but no PNG.
     bundle = make_bundle(tmp_path / "declared", figures=("table_01",))
@@ -513,6 +695,111 @@ def test_figures_rejects_non_png_and_subdirs(tmp_path):
     problems = bundle_problems(bundle)
     assert any("non-png" in p for p in problems)
     assert any("subdirectory" in p for p in problems)
+
+
+def test_a_png_suffix_must_be_exactly_lowercase(tmp_path):
+    """The path a consumer is promised is literally figures/<label>.png.
+
+    Read case-insensitively, a .PNG crop validated clean while the
+    promised path did not exist on a case-sensitive filesystem, and
+    x.png beside x.PNG merged into one label with no report at all. So
+    the suffix is exact, and a .PNG file is named as the thing to
+    rename.
+    """
+    bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+    crop = bundle / "figures" / "table_01.png"
+    data = crop.read_bytes()
+    crop.unlink()
+    (bundle / "figures" / "table_01.PNG").write_bytes(data)
+    problems = bundle_problems(bundle)
+    assert any("table_01.PNG" in p and "lowercase" in p
+               for p in problems), problems
+    assert any("no figures/table_01.png" in p for p in problems), problems
+
+
+def test_a_crop_beside_its_uppercase_twin_is_not_a_silent_merge(tmp_path):
+    """The worst outcome of the case-insensitive read, closed.
+
+    Two files held one label and nothing was reported, so whichever a
+    consumer's own enumeration preferred won. Now the .png file is the
+    crop and the .PNG file is refused by name. Only a case-sensitive
+    filesystem can hold the two files at once, so anywhere else the
+    fault cannot be built and the test skips.
+    """
+    bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+    (bundle / "figures" / "table_01.PNG").write_bytes(PNG_STUB)
+    names = {child.name for child in (bundle / "figures").iterdir()}
+    if "table_01.PNG" not in names or "table_01.png" not in names:
+        pytest.skip("needs a case-sensitive filesystem")
+    problems = bundle_problems(bundle)
+    assert any("table_01.PNG" in p for p in problems), problems
+    assert list(figure_files(bundle)) == ["table_01"]
+
+
+def test_a_crop_that_is_not_a_png_is_refused(tmp_path):
+    """Eight bytes and a size, never a pixel.
+
+    A zero-byte file and a GIF renamed .png both passed with zero
+    problems, and the module docstring promises a consumer accepts what
+    passes here. The two faults read differently because they are fixed
+    differently: an empty file was never exported at all, and wrong
+    bytes were exported as the wrong format.
+    """
+    bundle = make_bundle(tmp_path / "b", figures=("table_01", "figure_01"))
+    (bundle / "figures" / "table_01.png").write_bytes(b"")
+    (bundle / "figures" / "figure_01.png").write_bytes(b"GIF89a junk")
+    problems = bundle_problems(bundle)
+    assert any("figures/table_01.png is empty" in p
+               for p in problems), problems
+    assert any("figures/figure_01.png does not start with the PNG "
+               "signature" in p for p in problems), problems
+
+
+@pytest.mark.skipif(os.name != "posix", reason="needs symlinks")
+def test_a_crop_that_is_not_a_regular_file_is_refused(tmp_path):
+    """A dangling link named .png held a label and passed clean.
+
+    A FIFO in the same place would have blocked the read forever.
+    Neither is a file a consumer can open, so both are refused by shape
+    before any byte is read.
+    """
+    bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+    crop = bundle / "figures" / "table_01.png"
+    crop.unlink()
+    crop.symlink_to(bundle / "nowhere")
+    problems = bundle_problems(bundle)
+    assert any("figures/table_01.png is not a regular file" in p
+               for p in problems), problems
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs mkfifo")
+def test_a_fifo_named_as_a_crop_cannot_block_validation(tmp_path):
+    bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+    crop = bundle / "figures" / "table_01.png"
+    crop.unlink()
+    os.mkfifo(crop)
+    problems = bundle_problems_must_return(bundle)
+    assert any("figures/table_01.png is not a regular file" in p
+               for p in problems), problems
+
+
+@pytest.mark.skipif(os.name != "posix", reason="needs POSIX permissions")
+def test_an_unreadable_figures_directory_is_reported_not_raised(tmp_path):
+    """An unreadable directory is not a malformed bundle, but it is
+    still answered with a problem: iterdir used to raise
+    PermissionError out of bundle_problems, which promises to raise for
+    no input. And nothing is claimed about what the directory holds,
+    because nothing could be read to claim it."""
+    if os.geteuid() == 0:
+        pytest.skip("root reads through permission bits")
+    bundle = make_bundle(tmp_path / "b", figures=("table_01",))
+    os.chmod(bundle / "figures", 0)
+    try:
+        problems = bundle_problems_must_return(bundle)
+    finally:
+        os.chmod(bundle / "figures", 0o755)
+    assert any("figures/ could not be read" in p for p in problems), problems
+    assert not any("no figures/table_01.png" in p for p in problems), problems
 
 
 def test_hidden_files_in_figures_are_ignored(tmp_path):
@@ -560,18 +847,17 @@ class TestFigureFiles:
         assert any("non-png" in p for p in bundle_problems(bundle))
         assert list(figure_files(bundle)) == ["table_01"]
 
-    def test_a_png_suffix_is_read_case_insensitively(self, tmp_path):
-        # The case this function exists to keep in one place: a crop saved as
-        # .PNG is a crop, and validation and enumeration have to agree that
-        # its label is the stem. A consumer with its own reading would see
-        # either a stray file or no crop at all, for a bundle that is valid.
+    def test_it_reads_the_suffix_exactly(self, tmp_path):
+        # The agreement this function exists for, now on an exact
+        # suffix: a .PNG file is not a crop here, and validation refuses
+        # it by name, so no consumer ever meets a label whose promised
+        # path figures/<label>.png does not exist on a case-sensitive
+        # filesystem. Reading the suffix case-insensitively also merged
+        # x.png and x.PNG into one label with no report at all.
         bundle = make_bundle(tmp_path / "b", figures=("table_01",))
-        crop = bundle / "figures" / "table_01.png"
-        data = crop.read_bytes()
-        crop.unlink()
-        (bundle / "figures" / "table_01.PNG").write_bytes(data)
-        assert bundle_problems(bundle) == []
+        (bundle / "figures" / "table_02.PNG").write_bytes(PNG_STUB)
         assert list(figure_files(bundle)) == ["table_01"]
+        assert any("table_02.PNG" in p for p in bundle_problems(bundle))
 
 
 # ------------------------------------------------------- tables/
@@ -835,6 +1121,26 @@ def test_tables_rejects_non_html_and_subdirs(tmp_path):
     problems = bundle_problems(bundle)
     assert any("contains a non-html file" in p for p in problems), problems
     assert any("contains a subdirectory" in p for p in problems), problems
+
+
+def test_an_html_suffix_must_be_exactly_lowercase(tmp_path):
+    """The tables/ half of the exact-suffix rule.
+
+    The promised path is tables/<label>.html, and a .HTML file is not
+    that path on a case-sensitive filesystem, for the same reason a
+    .PNG crop is not figures/<label>.png.
+    """
+    bundle = make_bundle(tmp_path / "b", figures=("table_01",),
+                         tables={"table_01": TABLE_STUB})
+    transcription = bundle / "tables" / "table_01.html"
+    markup = transcription.read_text(encoding="utf-8")
+    transcription.unlink()
+    (bundle / "tables" / "table_01.HTML").write_text(markup,
+                                                     encoding="utf-8")
+    problems = bundle_problems(bundle)
+    assert any("table_01.HTML" in p and "lowercase" in p
+               for p in problems), problems
+    assert table_files(bundle) == {}
 
 
 def test_hidden_files_in_tables_are_ignored(tmp_path):
@@ -1180,6 +1486,27 @@ def test_two_supplements_are_ordinary(tmp_path):
     assert list(supplement_dirs(bundle)) == ["appendix_a", "supplement_3"]
 
 
+def test_a_fault_in_a_later_supplement_is_reported(tmp_path):
+    """Every declared supplement is walked against the one reading of
+    supplements/, so a fault in the second is as loud as a fault in the
+    first. A rebound loop variable once ended the walk's sight after one
+    supplement, and every supplement sorting later validated in silence.
+    """
+    bundle = make_bundle(tmp_path / "b")
+    add_supplement(bundle, "appendix_a")
+    root = add_supplement(bundle, "supplement_3")
+    (root / "figures").mkdir()
+    (root / "figures" / "sneaked_in.png").write_bytes(PNG_STUB)
+    declare_supplements(bundle, [entry("appendix_a"),
+                                 entry("supplement_3",
+                                       ("supplement_3_fig_01",))])
+    problems = bundle_problems(bundle)
+    assert any("there is no supplements/supplement_3/figures/"
+               "supplement_3_fig_01.png" in p for p in problems), problems
+    assert any("supplements/supplement_3/figures/sneaked_in.png is not "
+               "declared" in p for p in problems), problems
+
+
 def test_a_supplement_directory_needs_its_declaration(tmp_path):
     bundle = make_bundle(tmp_path / "b")
     add_supplement(bundle, "appendix_a")
@@ -1294,6 +1621,31 @@ def test_a_declared_supplement_with_no_directory_reports_once(tmp_path):
     assert "there is no supplements/absent_one/" in problems[0]
 
 
+def test_supplements_that_is_not_a_directory_is_one_problem(tmp_path):
+    """The fault figures/ and tables/ name in the same words. One file
+    displaces every declared supplement's directory at once, so naming
+    the file is the whole report; a missing-directory line per declared
+    name would be noise derived from it."""
+    bundle = make_bundle(tmp_path / "b")
+    (bundle / "supplements").write_text("not a directory", encoding="utf-8")
+    declare_supplements(bundle, [entry("appendix_a")])
+    problems = bundle_problems(bundle)
+    assert len(problems) == 1, problems
+    assert "supplements exists but is not a directory" in problems[0]
+
+
+def test_a_file_named_supplements_needs_no_declaration_to_be_refused(
+        tmp_path):
+    """As a file named figures or tables would be. There is nothing to
+    cross-check, but the name the format reserves is taken, and a bundle
+    that later declares a supplement has nowhere to put it."""
+    bundle = make_bundle(tmp_path / "b")
+    (bundle / "supplements").write_text("not a directory", encoding="utf-8")
+    problems = bundle_problems(bundle)
+    assert problems == ["supplements exists but is not a directory: "
+                        f"{bundle / 'supplements'}"]
+
+
 def test_a_loose_file_under_supplements_is_refused_undeclared_too(tmp_path):
     """It is neither a supplement nor a supplement's asset either way."""
     bundle = make_bundle(tmp_path / "b")
@@ -1376,6 +1728,26 @@ def test_two_supplements_may_not_share_a_label(tmp_path):
                for p in problems), problems
 
 
+def test_a_supplement_label_clash_outlives_a_malformed_manifest(tmp_path):
+    """A clash between two supplements does not depend on the manifest's
+    exhibits, so a fault there must not hide it. Only the article's own
+    clashes wait for the manifest: with its block malformed the article's
+    labels are unknown, and a clash claimed against them would be a
+    guess."""
+    bundle = make_bundle(tmp_path / "b")
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    manifest["exhibits"] = "not a list"
+    (bundle / "manifest.json").write_text(json.dumps(manifest))
+    add_supplement(bundle, "appendix_a", labels=("shared_01",))
+    add_supplement(bundle, "supplement_3", labels=("shared_01",))
+    declare_supplements(bundle, [entry("appendix_a", ("shared_01",)),
+                                 entry("supplement_3", ("shared_01",))])
+    problems = bundle_problems(bundle)
+    assert any("which supplement 'appendix_a' already declares" in p
+               for p in problems), problems
+    assert not any("manifest.json already declares" in p for p in problems)
+
+
 # ------------------------------------- a supplement's own assets
 
 def test_a_supplement_s_exhibits_are_bound_to_its_own_figures(tmp_path):
@@ -1415,6 +1787,50 @@ def test_a_supplement_s_figures_directory_takes_pngs_only(tmp_path):
     problems = bundle_problems(bundle)
     assert any("supplements/appendix_a/figures/ contains a non-png file" in p
                for p in problems), problems
+
+
+def test_a_supplement_s_crop_is_held_to_the_png_signature(tmp_path):
+    """The article's content check, at the supplement's path.
+
+    A supplement's figures/ is read by the same function with only a
+    prefix changed, so a zero-byte or renamed file there is refused on
+    the article's terms and named where it sits.
+    """
+    bundle = make_bundle(tmp_path / "b")
+    root = add_supplement(bundle, "appendix_a",
+                          labels=("appendix_a_table_01",))
+    (root / "figures" / "appendix_a_table_01.png").write_bytes(b"%PDF-1.4")
+    declare_supplements(bundle, [entry("appendix_a",
+                                       ("appendix_a_table_01",))])
+    problems = bundle_problems(bundle)
+    assert any("supplements/appendix_a/figures/appendix_a_table_01.png "
+               "does not start with the PNG signature" in p
+               for p in problems), problems
+
+
+def test_a_supplement_s_figures_may_not_be_a_file(tmp_path):
+    """The article's report, at the supplement's path. The walk keeps
+    going: bundle_problems never raises for a malformed bundle, and an
+    unusable figures/ in one supplement says nothing about the next."""
+    bundle = make_bundle(tmp_path / "b")
+    root = add_supplement(bundle, "appendix_a")
+    (root / "figures").write_text("not a directory", encoding="utf-8")
+    add_supplement(bundle, "supplement_3")
+    declare_supplements(bundle, [entry("appendix_a"), entry("supplement_3")])
+    problems = bundle_problems(bundle)
+    assert problems == ["supplements/appendix_a/figures exists but is not a "
+                        f"directory: {root / 'figures'}"]
+
+
+def test_a_supplement_s_tables_may_not_be_a_file(tmp_path):
+    """The article's report again, for the other asset directory."""
+    bundle = make_bundle(tmp_path / "b")
+    root = add_supplement(bundle, "appendix_a")
+    (root / "tables").write_text("not a directory", encoding="utf-8")
+    declare_supplements(bundle, [entry("appendix_a")])
+    problems = bundle_problems(bundle)
+    assert problems == ["supplements/appendix_a/tables exists but is not a "
+                        f"directory: {root / 'tables'}"]
 
 
 def test_an_empty_supplement_text_is_a_mistake_not_a_signal(tmp_path):

@@ -99,8 +99,8 @@ and optionally `notes` (non-empty string when present). No other keys.
 Required, UTF-8, non-empty. The full text of the paper as markdown.
 The contract checks shape only. The conventions that make a good
 text.md (heading depths mirroring the paper, exhibit sentinels,
-emphasis as printed, character fidelity) belong to the converter that
-writes one, and differ between converters on purpose.
+emphasis as printed, character fidelity) are in `docs/quality.md`:
+the target a converter writes to, which nothing here validates.
 
 ## figures/
 
@@ -408,6 +408,9 @@ cell merging is a common way a table is misread. That one is the
 render's to catch, because a merged cell and two cells do not draw
 alike. Those are held by whatever checks a converter runs on its own
 way to a bundle, and by whoever reads the bundle, not by this contract.
+What those properties ought to be is written down in `docs/quality.md`,
+for text, crops, transcriptions and the manifest alike. It is a target,
+not a check, and a change to it moves no `schema_version`.
 
 The transcription is the place where that gap matters most, because
 text invites quoting in a way an image does not. What closes it is the

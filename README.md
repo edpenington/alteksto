@@ -4,7 +4,9 @@ One paper PDF becomes one paper bundle: markdown full text, cropped
 figures and tables, the tables also as text, and a manifest, faithful
 to the page down to the characters. The bundle format is specified in
 `docs/bundle.md`, enforced by `tools/validate_bundle.py`, and consumed
-downstream by *meltiro* (github.com/edpenington/meltiro).
+downstream by *meltiro* (github.com/edpenington/meltiro). What a good
+bundle is, as distinct from a valid one, is in `docs/quality.md`: the
+target every engine writes to, which the validator does not check.
 
 The conversion is agentic, and the playbook is the product: an engine
 holds the prompts that teach an agent what a good extraction looks like
@@ -17,10 +19,11 @@ the format and nothing else: it imports the standard library, and a
 consumer that reads and checks bundles installs that alone. Everything
 that produces a bundle lives under `engines/`, one directory per engine,
 each owning its playbook, its tools, its helpers and its agents, and
-sharing nothing with the others but the contract. The engine shipped
-here is `engines/walk/`; the point of the arrangement is that a second
-one can differ from it completely and still be judged the same way,
-which is whether `tools/validate_bundle.py` passes.
+sharing nothing with the others but the contract and the target. The
+engine shipped here is `engines/walk/`; the point of the arrangement
+is that a second one can differ from it completely and still be held
+to one target, `docs/quality.md`, and one check,
+`tools/validate_bundle.py`.
 
 ## If you were asked to use alteksto
 

@@ -119,9 +119,9 @@ Two reads, neither of which needs the playbook:
 and `work/{id}/sweep-report.md`, which lists what fresh eyes found and
 what the converter did about each finding. The validator proves the
 bundle is well-formed and says nothing about fidelity; the sweep
-report is where fidelity is argued. A sweep that found nothing says so
-explicitly, so an empty file is a failure to report rather than a
-clean run.
+report is where fidelity is argued, and `docs/quality.md` says what
+fidelity is. A sweep that found nothing says so explicitly, so an
+empty file is a failure to report rather than a clean run.
 
 ## Papers in parallel
 

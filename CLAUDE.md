@@ -16,17 +16,24 @@ between them is the point:
   the product, and its tools are the thin scripts they rely on. There is
   no deterministic pipeline.
 
-An engine owns its playbook, tools, lib and agents, and shares nothing
-with the other engines but the format. That is deliberate: shared
-producer code would quietly make the next engine resemble the last, and
-the reason to keep several is to compare processes that differ. The
-dependency runs one way, engine to format, never back.
+`docs/quality.md` is owned here with the format: it says what a good
+bundle is, for every engine, and the validator does not check it.
+
+An engine owns its playbook, tools, lib and agents, and shares no code
+with the other engines. What it shares is the format and the target in
+`docs/quality.md`. That is deliberate. Shared producer code would
+quietly make the next engine resemble the last, and the reason to keep
+several is to compare processes that reach one target by different
+routes. The dependency runs one way, engine to format, never back.
 
 The engine shipped here is `engines/walk/`. Start at
 `engines/walk/playbook/00-route.md` to convert a paper;
-`engines/walk/playbook/quality.md` says what the work must come out as.
-Start at `docs/calling.md` instead to have papers converted: one
-`prepare-paper-walk` agent per paper, and the playbook stays unread.
+`docs/quality.md` says what the work must come out as, and
+`engines/walk/playbook/quality.md` says it again in the engine's own
+terms, with the defects that engine's witnesses produce. Where the two
+differ, `docs/quality.md` is the target. Start at `docs/calling.md`
+instead to have papers converted: one `prepare-paper-walk` agent per
+paper, and the playbook stays unread.
 
 ## Working rules
 
@@ -55,9 +62,9 @@ Start at `docs/calling.md` instead to have papers converted: one
   proves it against a wheel installed with no page stack present.
 - The bundle format is owned here: `docs/bundle.md` is the
   specification, `tools/validate_bundle.py` enforces it, and *meltiro*
-  (github.com/edpenington/meltiro) consumes it. The emitted bundle must
-  pass validate-bundle. Intermediates stay in `work/`, never in the
-  bundle.
+  (github.com/edpenington/meltiro) consumes it. `docs/quality.md` is
+  the quality standard, owned here too. The emitted bundle must pass
+  validate-bundle. Intermediates stay in `work/`, never in the bundle.
 
 ## Writing style
 

@@ -115,9 +115,10 @@ Per paper, two reads, neither of which needs the playbook:
     .venv/bin/python tools/validate_bundle.py bundles/{id}
 
 and `work/{id}/sweep-report.md`, which lists what fresh eyes found and
-what the converter did about each finding. Report a table: id,
-validator result, sweep findings, anything the converter stopped on.
-Then move the bundles to wherever the project collects them.
+what the converter did about each finding; `docs/quality.md` says what
+fidelity is. Report a table: id, validator result, sweep findings,
+anything the converter stopped on. Then move the bundles to wherever
+the project collects them.
 
 A sweep that found nothing says so explicitly, so an empty report file
 is a converter that failed to report rather than a clean run. Say that

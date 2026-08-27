@@ -629,20 +629,23 @@ def test_a_correct_transcription_passes_clean(tmp_path, shape):
     # column, which is the whole reason the tiling is checked.
     ('<table><tr><th>Study</th><th colspan="2">Cut</th></tr>'
      '<tr><td>Ashby</td><td>4.8</td></tr></table>',
-     "leaves row 1 column 2 uncovered"),
+     "leaves row 2 column 3 (counted from 1, thead rows included) "
+     "uncovered"),
     ('<table><tr><th>Study</th><th>Cut</th><th>Uncut</th></tr>'
      '<tr><td>Ashby</td><td>4.8</td></tr></table>',
-     "leaves row 1 column 2 uncovered"),
+     "leaves row 2 column 3 (counted from 1, thead rows included) "
+     "uncovered"),
     # A rowspan one too long does not collide: the next row's cells skip
     # the position it claimed and the row runs one wide, so the fault
     # surfaces as a hole. An overlap needs a span that starts on a free
     # position and then reaches across a claimed one.
     ('<table><tr><td rowspan="2">Cut</td><td>4.8</td></tr>'
      '<tr><td>3.1</td><td>2.4</td></tr></table>',
-     "leaves row 0 column 2 uncovered"),
+     "leaves row 1 column 3 (counted from 1, thead rows included) "
+     "uncovered"),
     ('<table><tr><td>a</td><td rowspan="2">b</td></tr>'
      '<tr><td colspan="3">c</td></tr></table>',
-     "two cells covering row 1 column 1"),
+     "two cells covering row 2 column 2"),
     # The whitelist.
     ("<table><caption>Table 1.</caption><tr><td>a</td></tr></table>",
      "the exhibit's caption is carried by text.md"),
@@ -670,6 +673,12 @@ def test_a_correct_transcription_passes_clean(tmp_path, shape):
     ('<table><tr><th scope="middle">a</th></tr></table>',
      "scope='middle'"),
     ('<table><tr><td colspan="2" colspan="3">a</td><td>b</td></tr></table>',
+     "repeats the 'colspan' attribute on <td>; a parser keeps the first"),
+    ('<table><tr><td colspan>a</td></tr></table>',
+     "gives <td> colspan with no value"),
+    # A repeat of a bare attribute is still a repeat: a parser reads the
+    # bare first occurrence, so the valued one never takes effect.
+    ('<table><tr><td colspan colspan="2">a</td><td>b</td></tr></table>',
      "repeats the 'colspan' attribute"),
     # Spans that are not spans.
     ('<table><tr><td colspan="0">a</td></tr></table>',
@@ -694,7 +703,7 @@ def test_a_correct_transcription_passes_clean(tmp_path, shape):
     ("<table><tr><td/></tr></table>", "writes <td/> in the self-closing"),
     ("<table></table>", "has no cells"),
     ("<table><tr><td>a</td></tr><tr></tr></table>",
-     "writes no cells in row 1"),
+     "writes no cells in row 2"),
     ("not a table at all", "contains no <table>"),
     ("<sup>a</sup>", "uses <sup> outside any cell"),
 ])
@@ -713,6 +722,41 @@ def test_an_empty_transcription_is_not_a_transcription(tmp_path):
     assert any("is empty" in p for p in bundle_problems(bundle))
 
 
+def test_a_misplaced_cell_is_not_also_an_empty_table():
+    """A cell outside any row is one fault, and it is not "no cells".
+
+    The file wrote a cell; the position problem says where it went
+    wrong. Adding that the file has no cells and should be omitted is
+    false of the file and advises deleting a transcription that has
+    content in it. Cells are counted when written, not when the grid
+    can place them, and a table with nothing written at all still says
+    so.
+    """
+    for markup in ("<table><td>a</td></table>",
+                   "<table><thead><td>a</td></thead></table>",
+                   "<table><tbody><td>a</td></tbody></table>"):
+        problems = table_html_problems(markup, "t.html")
+        assert any("a cell belongs in <tr>" in p
+                   for p in problems), problems
+        assert not any("has no cells" in p for p in problems), problems
+    problems = table_html_problems("<table><tr></tr></table>", "t.html")
+    assert any("has no cells" in p for p in problems), problems
+
+
+def test_a_refused_element_self_closed_is_one_problem():
+    """One fault, one problem, and no message teaching a way round.
+
+    Told that every element but <br> is opened and closed, an author
+    holding <img/> writes <img></img> and is refused again. For an
+    element outside the whitelist the refusal is the whole answer, so
+    the self-closing complaint is kept for whitelisted elements only.
+    """
+    problems = table_html_problems(
+        "<table><tr><td><img/></td></tr></table>", "t.html")
+    assert any("uses <img>" in p for p in problems), problems
+    assert not any("self-closing" in p for p in problems), problems
+
+
 def test_a_holed_grid_reports_its_position_and_stops_counting(tmp_path):
     """Five holes are named and the rest are counted.
 
@@ -728,6 +772,22 @@ def test_a_holed_grid_reports_its_position_and_stops_counting(tmp_path):
     assert len(named) == 5
     assert any("leaves 7 further positions uncovered" in p
                for p in problems), problems
+
+
+def test_a_grid_position_is_counted_as_a_reader_counts():
+    """A position names where to look, so it uses the reader's count.
+
+    The grid is built 0-based with thead rows in the row numbering, and
+    a person holding the printed table counts neither way: told "row 0,
+    column 2" against a table with a header, they look in the wrong
+    place. Every position is 1-based, counts thead rows, and says so,
+    because an unstated basis is ambiguous even when it is the right one.
+    """
+    markup = ('<table><thead><tr><th>Study</th><th>n</th></tr></thead>'
+              '<tbody><tr><td>Ashby</td></tr></tbody></table>')
+    problems = table_html_problems(markup, "t.html")
+    assert any("leaves row 2 column 2 (counted from 1, thead rows "
+               "included) uncovered" in p for p in problems), problems
 
 
 def test_a_transcription_is_optional_exhibit_by_exhibit(tmp_path):
@@ -841,7 +901,8 @@ def test_a_rowspan_may_not_reach_past_the_last_row(tmp_path):
               '<tr><td rowspan="2">April</td>'
               '<td rowspan="2">142</td></tr></table>')
     problems = table_html_problems(hidden, "t.html")
-    assert any("rowspan reaching row 2 when the table writes 2 rows" in p
+    assert any("rowspan reaching row 3 (counted from 1, thead rows "
+               "included) when the table writes 2 rows" in p
                for p in problems), problems
 
 
@@ -852,7 +913,11 @@ def test_an_overhanging_rowspan_does_not_invent_rows_to_complain_about(
               '<tr><td rowspan="3">b</td><td>c</td></tr></table>')
     problems = table_html_problems(markup, "t.html")
     assert any("2 by 2 table" in p for p in problems), problems
-    assert not any("row 3" in p for p in problems), problems
+    # The overhang names row 3 as the first row past the end; no hole is
+    # invented there, and nothing names row 4.
+    assert not any("uncovered" in p and "row 3" in p
+                   for p in problems), problems
+    assert not any("row 4" in p for p in problems), problems
 
 
 def test_an_empty_row_may_not_be_covered_by_a_widened_span(tmp_path):
@@ -872,7 +937,30 @@ def test_an_empty_row_may_not_be_covered_by_a_widened_span(tmp_path):
               '<tr><td rowspan="2">April</td><td rowspan="2">142</td></tr>'
               '<tr></tr></table>')
     problems = table_html_problems(hidden, "t.html")
+    assert any("writes no cells in row 3" in p for p in problems), problems
+
+
+def test_an_empty_row_is_one_problem_not_a_problem_per_column():
+    """One fault gives one problem.
+
+    An empty row not covered by spans also holes every column it has,
+    and each of those holes is the empty row said again: a ten-column
+    table would report the one missing row eleven times. The empty-row
+    problem carries the fault, so its holes are not repeated. A hole in
+    a row that does have cells is its own fault and stays reported.
+    """
+    markup = ("<table><tr><th>Season</th><th>n</th></tr>"
+              "<tr></tr>"
+              "<tr><td>April</td><td>142</td></tr></table>")
+    problems = table_html_problems(markup, "t.html")
+    assert len(problems) == 1, problems
+    assert "writes no cells in row 2" in problems[0]
+    holed = ("<table><tr><th>Season</th><th>n</th></tr>"
+             "<tr></tr>"
+             "<tr><td>April</td></tr></table>")
+    problems = table_html_problems(holed, "t.html")
     assert any("writes no cells in row 2" in p for p in problems), problems
+    assert any("leaves row 3 column 2" in p for p in problems), problems
 
 
 def test_the_occupancy_is_bounded_as_it_is_built(tmp_path):
@@ -956,6 +1044,20 @@ def test_a_bad_span_does_not_abort_the_rest_of_the_file():
     assert any("the attribute 'style'" in p for p in problems), problems
 
 
+def test_a_bare_attribute_is_said_in_words():
+    """`html.parser` hands a valueless attribute through as None.
+
+    `<td colspan>` is a mistake made in HTML, so the answer names it in
+    HTML's terms: Python's repr of None describes nothing the author
+    wrote and points at nothing they can change.
+    """
+    for markup in ('<table><tr><td colspan>a</td></tr></table>',
+                   '<table><tr><th scope>a</th></tr></table>'):
+        problems = table_html_problems(markup, "t.html")
+        assert any("with no value" in p for p in problems), problems
+        assert not any("None" in p for p in problems), problems
+
+
 def test_a_byte_order_mark_is_not_content(tmp_path):
     """It survives a UTF-8 read and the exhibit does not print it."""
     bundle = make_bundle(tmp_path / "b", figures=("table_01",))
@@ -976,6 +1078,31 @@ def test_table_html_problems_is_the_rule_a_tool_can_reuse():
     assert table_html_problems(TABLE_STUB, "t.html") == []
     problems = table_html_problems("<p>not a table</p>", "t.html")
     assert problems and all(p.startswith("t.html") for p in problems)
+
+
+def test_every_void_element_is_classified_as_inline():
+    """A void element is written alone and never pushed on the stack.
+
+    The parser's stack logic assumes a void element is a cell's own
+    markup, so one that were not also inline would either be refused as
+    unknown while the void rules name it, or would skip the placement
+    checks entirely. The whitelist is derived from the classifying sets,
+    and this is the one relation the derivation does not force.
+    """
+    from alteksto.bundle import _INLINE_ELEMENTS, _VOID_ELEMENTS
+    assert _VOID_ELEMENTS <= _INLINE_ELEMENTS
+
+
+def test_a_named_refusal_is_never_also_whitelisted():
+    """A note is the reason an element is refused, nothing else.
+
+    The notes are read only when the whitelist has refused an element,
+    so an element holding both a note and a place in the whitelist would
+    be accepted while carrying the text of its own refusal, and one of
+    the two would have to be a mistake.
+    """
+    from alteksto.bundle import _TABLE_ELEMENTS, _TABLE_ELEMENT_NOTES
+    assert not set(_TABLE_ELEMENT_NOTES) & _TABLE_ELEMENTS
 
 
 # -------------------------------------------- supplements.json and supplements/
@@ -1273,7 +1400,8 @@ def test_a_supplement_s_transcription_is_held_to_the_same_rules(tmp_path):
                                        ("appendix_a_table_01",))])
     problems = bundle_problems(bundle)
     assert any("supplements/appendix_a/tables/appendix_a_table_01.html "
-               "leaves row 1 column 1 uncovered" in p
+               "leaves row 2 column 2 (counted from 1, thead rows "
+               "included) uncovered" in p
                for p in problems), problems
 
 

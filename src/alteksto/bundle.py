@@ -714,6 +714,20 @@ class _TableHTMLParser(HTMLParser):
     def _problem(self, message: str) -> None:
         self.problems.append(f"{self.where} {message}")
 
+    @staticmethod
+    def _at(row, column=None) -> str:
+        """A grid position, phrased so a reader can find it.
+
+        The grid is built 0-based with thead rows in the row count, and
+        neither is how a person reads a printed table, so a bare index
+        sends them to the wrong row. Every message that names a position
+        counts from 1 and says what the count includes.
+        """
+        place = f"row {row + 1}"
+        if column is not None:
+            place = f"{place} column {column + 1}"
+        return f"{place} (counted from 1, thead rows included)"
+
     # -- element events ------------------------------------------------
 
     def handle_starttag(self, tag, attrs):
@@ -722,7 +736,12 @@ class _TableHTMLParser(HTMLParser):
             self.stack.append(tag)
 
     def handle_startendtag(self, tag, attrs):
-        if tag not in _VOID_ELEMENTS:
+        # Only a whitelisted element earns the self-closing complaint.
+        # For a refused one the refusal below is the whole answer, and
+        # saying every other element is opened and closed beside it
+        # would teach an author to write the refused element that way
+        # and be refused again.
+        if tag in _TABLE_ELEMENTS and tag not in _VOID_ELEMENTS:
             self._problem(f"writes <{tag}/> in the self-closing form; only "
                           f"<br> is written that way, and every other "
                           f"element is opened and closed")
@@ -806,6 +825,12 @@ class _TableHTMLParser(HTMLParser):
             self.column = 0
             self.cells_in_row = 0
         elif tag in _CELL_ELEMENTS:
+            # Counted when written, not when placed. A cell outside any
+            # row is already reported by _check_position, and saying the
+            # file has no cells on top of that would be false of the
+            # file and would advise omitting a transcription that has
+            # content in it.
+            self.cells += 1
             self._place_cell(tag, values)
 
     def _check_position(self, tag):
@@ -843,11 +868,17 @@ class _TableHTMLParser(HTMLParser):
     def _check_attributes(self, tag, attrs) -> dict:
         allowed = _TABLE_ATTRIBUTES.get(tag, frozenset())
         values: dict[str, str] = {}
+        # Tracked apart from `values`, which holds only what was allowed
+        # and valued: a repeat of a refused or bare attribute is still a
+        # repeat, and a parser still drops it.
+        seen: set[str] = set()
         for name, value in attrs:
-            if name in values:
+            if name in seen:
                 self._problem(f"repeats the {name!r} attribute on <{tag}>; "
-                              f"only the last would survive a parse")
+                              f"a parser keeps the first and drops the "
+                              f"rest, so say it once")
                 continue
+            seen.add(name)
             if name not in allowed:
                 if allowed:
                     self._problem(
@@ -856,6 +887,13 @@ class _TableHTMLParser(HTMLParser):
                 else:
                     self._problem(f"gives <{tag}> the attribute {name!r}; "
                                   f"it carries no attributes")
+                continue
+            if value is None:
+                # `html.parser` hands a bare attribute (`<td colspan>`)
+                # through with None for its value.
+                self._problem(f"gives <{tag}> {name} with no value; a "
+                              f"bare attribute says nothing, so give it "
+                              f"a value or leave it out")
                 continue
             values[name] = value
         scope = values.get("scope")
@@ -875,7 +913,7 @@ class _TableHTMLParser(HTMLParser):
         # would not, and "\u0662" converts to 2 where a renderer reading
         # HTML's ASCII-only rule for a non-negative integer reads 1. Either
         # way the grid this validates is not the grid a consumer lays out.
-        if raw is None or not (raw.isascii() and raw.isdigit()):
+        if not (raw.isascii() and raw.isdigit()):
             self._problem(f"gives <{tag}> {name}={raw!r}; a span is a "
                           f"positive whole number")
             return 1
@@ -919,11 +957,10 @@ class _TableHTMLParser(HTMLParser):
                     clash = position
                 self.occupied[position] = True
         if clash is not None:
-            self._problem(f"has two cells covering row {clash[0]} column "
-                          f"{clash[1]}; a span reaches across a cell that "
-                          f"is already there")
+            self._problem(f"has two cells covering {self._at(*clash)}; a "
+                          f"span reaches across a cell that is already "
+                          f"there")
         self.column = column + colspan
-        self.cells += 1
         self.cells_in_row += 1
 
     # -- the verdict ---------------------------------------------------
@@ -938,9 +975,10 @@ class _TableHTMLParser(HTMLParser):
             problems.append(f"{self.where} contains no <table>; a "
                             f"transcription is one table element")
             return problems
-        # Before the cell count, because a grid that overflowed stopped
-        # placing cells and would otherwise also be reported as empty,
-        # which is true of the parse and not of the file.
+        # A grid that overflowed stopped placing cells, so its holes,
+        # empty rows and overhangs would describe the truncated parse
+        # and not the file. The overflow problem already says what to
+        # fix.
         if self.grid_overflowed:
             return problems
         if not self.cells:
@@ -948,7 +986,8 @@ class _TableHTMLParser(HTMLParser):
                             f"nothing to transcribe omits the file")
             return problems
         for row in self.empty_rows:
-            problems.append(f"{self.where} writes no cells in row {row}; "
+            problems.append(f"{self.where} writes no cells in "
+                            f"{self._at(row)}; "
                             f"every row carries at least one. A row whose "
                             f"positions are all claimed by spans from "
                             f"above prints nothing, so no exhibit has one, "
@@ -972,7 +1011,8 @@ class _TableHTMLParser(HTMLParser):
         beyond = sorted({row for row, _ in self.occupied if row >= rows})
         if not beyond:
             return []
-        return [f"{self.where} has a rowspan reaching row {beyond[0]} when "
+        return [f"{self.where} has a rowspan reaching "
+                f"{self._at(beyond[0])} when "
                 f"the table writes {rows} rows; a span cannot claim rows "
                 f"that are not there, so either the span is longer than "
                 f"the exhibit prints or a row is missing"]
@@ -1001,15 +1041,22 @@ class _TableHTMLParser(HTMLParser):
                     f"spans are wrong rather than the table being large"]
         if len(within) == rows * columns:
             return []
+        # A row already reported empty holes every column spans do not
+        # reach, and each of those holes is the empty row said again, one
+        # message per column. The empty-row problem carries the fault, so
+        # its holes are not repeated; a hole in a row that does have cells
+        # is its own fault and stays.
+        empty = set(self.empty_rows)
         holes = [(row, column)
                  for row in range(rows)
                  for column in range(columns)
-                 if (row, column) not in self.occupied]
+                 if row not in empty
+                 and (row, column) not in self.occupied]
         if not holes:
             return []
         shown = holes[:5]
         problems = [
-            f"{self.where} leaves row {row} column {column} uncovered; the "
+            f"{self.where} leaves {self._at(row, column)} uncovered; the "
             f"cells of a {rows} by {columns} table cover every position "
             f"exactly once, so a hole is a cell that is missing or a span "
             f"that is one too small"
@@ -1019,6 +1066,8 @@ class _TableHTMLParser(HTMLParser):
                             f"further positions uncovered")
         return problems
 
+
+# ------------------------------------ supplements.json and supplements/
 
 # supplements.json: the paper's identity, and the supplements it carries.
 # No schema_version of its own; one bundle declares one version, in the

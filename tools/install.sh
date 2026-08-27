@@ -65,6 +65,31 @@ LINK_TARGETS=("${ROOT}/.claude/skills/alteksto"
               "${ROOT}/engines/walk/agents/prepare-paper.md"
               "${ROOT}/engines/walk/agents/sweep-paper.md")
 
+# Names this checkout registered before an engine's agents carried its
+# name. The rename left them pointing at files that have moved into the
+# engine, so an install predating it leaves two dead links behind that
+# nothing else here would mention: they are not in LINK_PATHS, so the
+# removal below does not take them back and the health check does not
+# read them. Only a link into this checkout is ours to drop; one naming
+# somewhere else belongs to that install.
+LEGACY_PATHS=("${CLAUDE_DIR}/agents/prepare-paper.md"
+              "${CLAUDE_DIR}/agents/sweep-paper.md")
+
+drop_legacy() {
+    local path target
+    for path in "${LEGACY_PATHS[@]}"; do
+        [ -L "${path}" ] || continue
+        target="$(readlink "${path}")"
+        case "${target}" in
+            "${ROOT}"/*)
+                run rm "${path}"
+                [ "$DRY_RUN" = 1 ] || say "removed stale name: ${path}"
+                ;;
+            *) say "left alone (points elsewhere): ${path}" ;;
+        esac
+    done
+}
+
 # Removal takes back exactly what this checkout registered. A link
 # pointing at some other checkout belongs to that one, a real file
 # belongs to whoever wrote it, and an ALTEKSTO_HOME naming somewhere
@@ -86,10 +111,11 @@ if [ "$UNINSTALL" = 1 ]; then
             say "left alone (not a link): ${path}"
         fi
     done
+    drop_legacy
     if [ "$DRY_RUN" = 1 ]; then
-        say "would remove ${removed} of 3 registrations"
+        say "would remove ${removed} of ${#LINK_PATHS[@]} registrations"
     else
-        say "${removed} of 3 registrations removed"
+        say "${removed} of ${#LINK_PATHS[@]} registrations removed"
     fi
 
     if [ -f "${SETTINGS}" ] && [ "$DRY_RUN" = 0 ]; then
@@ -162,6 +188,7 @@ link() {
 }
 
 run mkdir -p "${CLAUDE_DIR}/skills" "${CLAUDE_DIR}/agents"
+drop_legacy
 for index in "${!LINK_PATHS[@]}"; do
     link "${LINK_TARGETS[$index]}" "${LINK_PATHS[$index]}"
 done

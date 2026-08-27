@@ -14,7 +14,7 @@ rather than by how they work. Everything below is the same whichever you
 call: only the converter's name changes, and it carries the engine's.
 The engine shipped here is walk, whose converter is
 `prepare-paper-walk`, and it is the right default when you have no
-reason to want another. `engines/` lists what a checkout holds.
+reason to want another. `engines/README.md` lists what a checkout holds.
 
 ## The rule
 

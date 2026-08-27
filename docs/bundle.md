@@ -330,7 +330,7 @@ playbook) and by whoever reads the bundle, not by this contract.
 The transcription is the place where that gap matters most, because
 text invites quoting in a way an image does not. What closes it is the
 producing side: the structural check here, then a render of the
-transcription compared against the crop (an engine's job, and walk's
-`engines/walk/tools/render_table.py`), then the fresh-context sweep. A
-bundle reaches a consumer having been through all three, which is what
-makes "the file exists" mean something.
+transcription compared against the crop, then the fresh-context sweep.
+Both are the producing side's to arrange, and how an engine arranges them
+is its own business. A bundle reaches a consumer having been through all
+three, which is what makes "the file exists" mean something.

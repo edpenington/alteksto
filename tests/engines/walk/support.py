@@ -9,10 +9,8 @@ import pymupdf
 from tests.support import REPO_ROOT, load_script
 
 ENGINE = REPO_ROOT / "engines" / "walk"
-# The worked example is shared, because comparing engines means one input
-# and one target. What this engine expects to find on the way there is its
-# own business and lives with the engine.
-EXAMPLES = REPO_ROOT / "examples"
+# Where this engine records what it should arrive at on the shared worked
+# example, which `tests.support.EXAMPLES` names.
 WALK_EXAMPLE = ENGINE / "example"
 
 # Two single-line blocks on page one.

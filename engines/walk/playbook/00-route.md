@@ -88,26 +88,26 @@ quality.md). A paper with supplementary material also carries
 ## The toolbelt
 
 Each tool does one thing to one work directory and exits. Run them
-through the project venv, from the checkout root, and type the paths as
-written: this engine's tools are its own and live beside this playbook,
-while the validator belongs to the format rather than to any engine and
-sits at the root.
+through the project venv, from the checkout root, and type each command
+whole, continuations included. This engine's tools are its own and live
+beside this playbook, while the validator belongs to the format rather
+than to any engine and sits at the root.
 
-    python engines/walk/tools/stage.py --id ID --pdf PATH
+    python engines/walk/tools/stage.py --id ID --pdf PATH \
         [--supplement NAME] --work work
     python engines/walk/tools/render_pages.py work/{id} [--dpi 150]
     python engines/walk/tools/dump_blocks.py work/{id}
     python engines/walk/tools/ocr.py work/{id} [--transport fake]
     python engines/walk/tools/fetch_pmc.py work/{id} --doi DOI
-    python engines/walk/tools/crop.py work/{id}/pages/page_NN.png
-        --box X0 Y0 X1 Y1 [--box ...] [--space W H]
+    python engines/walk/tools/crop.py work/{id}/pages/page_NN.png \
+        --box X0 Y0 X1 Y1 [--box ...] [--space W H] \
         --out bundles/{id}/figures/{label}.png
-    python engines/walk/tools/render_table.py
-        bundles/{id}/tables/{label}.html
+    python engines/walk/tools/render_table.py \
+        bundles/{id}/tables/{label}.html \
         --out work/{id}/table_renders/{label}.png [--rotate 90]
-    python engines/walk/tools/assemble_supplements.py work/{id}
+    python engines/walk/tools/assemble_supplements.py work/{id} \
         --bundle bundles/{id}
-    python engines/walk/tools/check_refs.py work/{id}
+    python engines/walk/tools/check_refs.py work/{id} \
         --text bundles/{id}/text.md
 
     python tools/validate_bundle.py bundles/{id}

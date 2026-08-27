@@ -113,6 +113,46 @@ def test_a_stale_link_is_repointed(tmp_path):
         REPO_ROOT / ".claude" / "skills" / "alteksto")
 
 
+def _stale_registration(home):
+    """What an install from before the engine rename leaves on a machine.
+
+    Those links named `${ROOT}/.claude/agents/{name}`, which moved into
+    the engine, so they resolve to nothing now. They are not in LINK_PATHS
+    any more, so nothing takes them back unless the installer knows the
+    names it used to use.
+    """
+    agents = home / ".claude" / "agents"
+    agents.mkdir(parents=True)
+    for name in ("prepare-paper.md", "sweep-paper.md"):
+        (agents / name).symlink_to(REPO_ROOT / ".claude" / "agents" / name)
+    other = agents / "someone-elses.md"
+    other.symlink_to(home / "other-checkout" / "a.md")
+    return agents, other
+
+
+def test_the_names_used_before_the_engine_rename_are_taken_back(tmp_path):
+    agents, other = _stale_registration(tmp_path)
+
+    result = install(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    for name in ("prepare-paper.md", "sweep-paper.md"):
+        assert not (agents / name).is_symlink(), name
+    # A link into somebody else's checkout is not this one's to remove.
+    assert other.is_symlink()
+
+
+def test_uninstall_takes_back_the_names_used_before_the_rename(tmp_path):
+    agents, other = _stale_registration(tmp_path)
+    assert install(tmp_path).returncode == 0
+
+    assert install(tmp_path, "--uninstall").returncode == 0
+
+    for name in ("prepare-paper.md", "sweep-paper.md"):
+        assert not (agents / name).is_symlink(), name
+    assert other.is_symlink()
+
+
 def test_uninstall_takes_back_what_it_registered(tmp_path):
     assert install(tmp_path).returncode == 0
 

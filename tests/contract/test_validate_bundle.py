@@ -901,8 +901,7 @@ def test_validate_table_html_is_the_rule_a_tool_can_reuse():
 
     An engine that draws a transcription refuses what the format refuses
     by calling this, rather than forming its own opinion of what a table
-    is: `engines/walk/tools/render_table.py` is the one that does today.
-    If this ever stops being importable such a tool grows a second
+    is. If this ever stops being importable such a tool grows a second
     definition, which is the drift the function exists to prevent.
     """
     assert validate_table_html(TABLE_STUB, "t.html") == []
@@ -1296,12 +1295,12 @@ def test_the_contract_costs_a_consumer_nothing_to_install():
                 imported.update(a.name.split(".")[0] for a in node.names)
             elif isinstance(node, ast.ImportFrom):
                 if node.level:
-                    # A relative import: the module it names is a sibling
-                    # in this package, and it is read on its own turn
-                    # through the glob.
-                    imported.update(a.name for a in node.names)
-                    if node.module:
-                        imported.add(node.module.split(".")[0])
+                    # A relative import reaches a sibling in this package
+                    # and can reach nothing else, and the glob reads that
+                    # sibling on its own turn. Recording it here would
+                    # refuse a stdlib-only module the guard has already
+                    # cleared.
+                    continue
                 else:
                     imported.add(node.module.split(".")[0])
         assert imported <= set(sys.stdlib_module_names), (

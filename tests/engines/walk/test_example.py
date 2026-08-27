@@ -3,13 +3,12 @@
 Three things are held together here, because a worked example is only
 worth having if its parts describe the same paper: the PDF that
 examples/build_pdf.py prints, the skeleton and bundle committed beside
-it, and the crop regions recorded in expected/crops.json. Nothing here
+it, and the crop regions this engine records beside it. Nothing here
 touches the network, and no OCR is called.
 
 The PDF is built into tmp and thrown away, as the fixture rule requires.
 """
 
-import importlib.util
 import json
 import re
 import shutil
@@ -18,24 +17,15 @@ from pathlib import Path
 import pytest
 
 from alteksto.bundle import SCHEMA_VERSION, validate_table_html
-from tests.engines.walk.support import (EXAMPLES, WALK_EXAMPLE,
-                                        load_tool)
-# The validator belongs to the format, not to this engine.
-from tests.support import load_script
+from tests.engines.walk.support import WALK_EXAMPLE, load_tool
+# The shared example, and the validator, belong to the format rather than
+# to this engine.
+from tests.support import EXAMPLES, load_script
 
 EXPECTED = EXAMPLES / "expected"
 
 
-def _load_builder():
-    """Load examples/build_pdf.py as a module, the way conftest loads tools."""
-    spec = importlib.util.spec_from_file_location(
-        "build_pdf", EXAMPLES / "build_pdf.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-builder = _load_builder()
+builder = load_script("examples/build_pdf.py")
 
 STYLES = {builder.ITALIC: "italic", builder.BOLD: "bold"}
 # The roles whose text reaches text.md as running prose. A caption reaches

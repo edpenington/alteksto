@@ -17,11 +17,17 @@ rest of the papers have no orchestrator left.
 ## 0. Pick the engine
 
 alteksto keeps more than one way of converting a paper, one directory
-per engine under `engines/`. They differ in how they work and are
-compared by what they emit. Unless the user named one, use walk, the
-engine this repository shipped with: its converter is
-`prepare-paper-walk` and its tools are under `engines/walk/tools/`.
-Every step below is otherwise the same whichever engine you call.
+per engine under `engines/`, listed in `engines/README.md`. They differ
+in how they work and are compared by what they emit. Unless the user
+named one, use walk, the engine this repository shipped with: its
+converter is `prepare-paper-walk` and its tools are under
+`engines/walk/tools/`.
+
+Steps 1, 3 and 4 below are written for walk. Finding the checkout,
+staging, and the converter's name all belong to the engine, so for any
+other engine read `engines/{name}/README.md` and use what it names in
+those three steps. Step 5 is the same whichever you called, because
+checking the work is the format's side and not an engine's.
 
 Say which engine you used when you report, because a bundle is only
 comparable against another if both are named.

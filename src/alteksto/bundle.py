@@ -34,19 +34,23 @@ from pathlib import Path
 
 SCHEMA_VERSION = 4
 
-# `\Z`, not `$`: in Python `$` also matches immediately before a trailing
-# newline, so `^[A-Za-z0-9._-]+$` would accept "1234\n". Both values this
-# pattern guards break on a newline: the id becomes a filesystem path
-# component, and a label becomes both a figures/*.png stem and the token
-# consumers cite, neither of which can round-trip with a newline in it.
-_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+\Z")
-# The id is used verbatim as a path component downstream, so an id that is
-# all punctuation is a path-traversal hazard: "." and ".." resolve to real
-# directories. At least one letter or digit is required.
-_ID_ALNUM = re.compile(r"[A-Za-z0-9]")
-# An exhibit label names a file under figures/, so it obeys the same
-# filename-safe rule; a separator can never appear in one.
-_LABEL_PATTERN = _ID_PATTERN
+# The id, an exhibit label and a supplement name each become a directory
+# or a file stem inside the bundle, so one rule covers all three:
+# filename-safe characters, at least one of them alphanumeric.
+# `is_filename_safe` below is that rule as a single call, which is what
+# the producing side checks a name with before a conversion runs on it.
+#
+# `\Z`, not `$`: Python's `$` also matches before a trailing newline, so
+# `$` would accept "fig_01\n".
+_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]+\Z")
+# An all-punctuation name is a path-traversal hazard: "." and ".." resolve
+# to real directories.
+_NAME_ALNUM = re.compile(r"[A-Za-z0-9]")
+# The first half of the rule as its three problems say it, written once so
+# they cannot drift apart. `$` here, not `\Z`: it is the form a reader
+# knows, and the words beside it already exclude a trailing newline.
+_NAME_RULE = ("must match ^[A-Za-z0-9._-]+$ (letters, digits, dot, "
+              "underscore, dash only)")
 
 # The elements a table transcription may use. The list is short on purpose:
 # it is everything needed to say what a printed table says, and nothing that
@@ -144,8 +148,8 @@ def is_filename_safe(value) -> bool:
     rejects means the whole run happens and gate 1 is what finally says
     so, which is the expensive way to learn it.
     """
-    return bool(isinstance(value, str) and _ID_PATTERN.match(value)
-                and _ID_ALNUM.search(value))
+    return bool(isinstance(value, str) and _NAME_PATTERN.match(value)
+                and _NAME_ALNUM.search(value))
 
 
 def _is_int(value) -> bool:
@@ -294,12 +298,10 @@ def _validate_manifest(root: Path):
                 problems.append(f"manifest.json key {name!r} must be a "
                                 f"non-empty string")
             if name == "id" and value.strip():
-                if not _ID_PATTERN.match(value):
+                if not _NAME_PATTERN.match(value):
                     problems.append(
-                        f"manifest.json id {value!r} must match "
-                        f"^[A-Za-z0-9._-]+$ (letters, digits, dot, "
-                        f"underscore, dash only)")
-                elif not _ID_ALNUM.search(value):
+                        f"manifest.json id {value!r} {_NAME_RULE}")
+                elif not _NAME_ALNUM.search(value):
                     problems.append(
                         f"manifest.json id {value!r} must contain at least "
                         f"one letter or digit; ids like '.' or '..' are "
@@ -468,12 +470,10 @@ def _validate_exhibits(value, where="manifest.json"):
         label = entry.get("label")
         if not isinstance(label, str) or not label.strip():
             continue
-        if not _LABEL_PATTERN.match(label):
+        if not _NAME_PATTERN.match(label):
             problems.append(
-                f"{where} label {label!r} must match ^[A-Za-z0-9._-]+$ "
-                f"(letters, digits, dot, underscore, dash only): it is the "
-                f"stem of a figures/*.png file and the token consumers "
-                f"cite")
+                f"{where} label {label!r} {_NAME_RULE}: it is the stem of a "
+                f"figures/*.png file and the token consumers cite")
             continue
         if label in seen:
             problems.append(f"{where} label {label!r} is declared more than "
@@ -1181,21 +1181,17 @@ def _validate_supplement_entries(value, problems):
         name = entry.get("name")
         if not isinstance(name, str) or not name.strip():
             continue
-        if not _LABEL_PATTERN.match(name):
+        if not _NAME_PATTERN.match(name):
             problems.append(
-                f"{where} name {name!r} must match ^[A-Za-z0-9._-]+$ "
-                f"(letters, digits, dot, underscore, dash only): it names a "
+                f"{where} name {name!r} {_NAME_RULE}: it names a "
                 f"supplements/ directory and is the token a consumer asks "
                 f"for a supplement by")
             malformed = True
             continue
-        if not _ID_ALNUM.search(name):
-            # The same second half of the rule the id gets, and for the same
-            # reason: the name is used directly as a path component, and "."
-            # and ".." resolve to real directories. Without this, a
-            # supplement named ".." sends every check below to the bundle
-            # root, where it reads the article's own figures and reports
-            # them as a supplement's undeclared files.
+        if not _NAME_ALNUM.search(name):
+            # Without this, a supplement named ".." sends every check
+            # below to the bundle root, where it reads the article's own
+            # figures and reports them as a supplement's undeclared files.
             problems.append(
                 f"{where} name {name!r} must contain at least one letter or "
                 f"digit; names like '.' or '..' are rejected because the "
